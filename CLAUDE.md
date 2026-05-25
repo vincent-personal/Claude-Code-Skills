@@ -8,7 +8,7 @@
 ## 프로젝트 정체성
 
 **Claude Code 전역 스킬 모음 (Skills Collection).**
-어느 프로젝트에서나 `/task-add`, `/task-run`, `/task-clear` 등의 명령으로
+어느 프로젝트에서나 `/kai-task-add`, `/kai-task-run`, `/kai-task-clear` 등의 명령으로
 체크리스트 기반 작업 관리를 사용할 수 있도록 하는 스킬 저장소다.
 
 각 스킬 그룹은 독립 폴더로 관리되며, `install.sh` 가 `~/.claude/skills/` 와
@@ -27,9 +27,21 @@ Skills/                           ← 본 repo 루트
   task-manager/                   ← 스킬 그룹 1: 작업 관리
     install.sh                    ← 심볼릭 링크 설치 스크립트
     advisor.md                    ← Opus 자문 에이전트 정의
-    task-add/SKILL.md             ← /task-add 스킬
-    task-run/SKILL.md             ← /task-run 스킬
-    task-clear/SKILL.md           ← /task-clear 스킬
+    kai-task-add/SKILL.md             ← /kai-task-add 스킬
+    kai-task-run/SKILL.md             ← /kai-task-run 스킬
+    kai-task-clear/SKILL.md           ← /kai-task-clear 스킬
+  meeting-to-spec/                ← 스킬 그룹 2: 미팅 노트 → 시스템 사양
+    install.sh                    ← 심볼릭 링크 설치 스크립트
+    spec-advisor.md               ← Opus 메타 자문 에이전트 정의 (모든 role agent escalation 대상)
+    kai-meeting-to-spec/SKILL.md  ← /kai-meeting-to-spec 마스터 오케스트레이터
+    agents/                       ← 7개 fresh-context Opus role agent (Stage 0~6)
+      m2s-curator.md              ← Stage 0: Transcript Curator
+      m2s-ba.md                   ← Stage 1: Business Analyst
+      m2s-ops.md                  ← Stage 2: Operations Manager
+      m2s-marketing.md            ← Stage 3: Market & Marketing Strategist
+      m2s-tech.md                 ← Stage 4: Tech Lead + Solution Architect
+      m2s-ceo.md                  ← Stage 5: CEO/Founder
+      m2s-design.md               ← Stage 6: Product Design Lead
   {other-skill-group}/            ← 향후 추가될 스킬 그룹
     install.sh
     {skill-name}/SKILL.md
@@ -46,10 +58,10 @@ Skills/                           ← 본 repo 루트
 
 | 스킬 | 명령 | 역할 |
 |---|---|---|
-| task-add | `/task-add {설명}` | 영향 파일 의무 기록과 함께 `docs/check-list.md`에 항목 추가 |
-| task-run | `/task-run` | 미시작 항목 선점 → Tier별 advisor 호출 → 코드 작성 → 빌드 → 완료 처리 |
-| task-clear | `/task-clear` | 완료 항목을 `docs/check-list-done.md`로 이동 |
-| task-list | `/task-list` | 미완료 항목(미시작·진행중·확인필요)을 상태별로 요약 출력 (읽기 전용) |
+| kai-task-add | `/kai-task-add {설명}` | 영향 파일 의무 기록과 함께 `docs/check-list.md`에 항목 추가 |
+| kai-task-run | `/kai-task-run` | 미시작 항목 선점 → Tier별 advisor 호출 → 코드 작성 → 빌드 → 완료 처리 |
+| kai-task-clear | `/kai-task-clear` | 완료 항목을 `docs/check-list-done.md`로 이동 |
+| kai-task-list | `/kai-task-list` | 미완료 항목(미시작·진행중·확인필요)을 상태별로 요약 출력 (읽기 전용) |
 
 **핵심 설계 원칙 (수정 시 반드시 유지):**
 
@@ -65,13 +77,58 @@ Skills/                           ← 본 repo 루트
 
 ---
 
+### design-sync
+
+레퍼런스(HTML 파일 또는 프로젝트)에서 디자인 시스템을 추출하여 Angular V21 + Tailwind V4 + PrimeNG V21 프로젝트에 완전히 동일한 테마로 적용하는 파이프라인.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-design-sync | `/kai-design-sync <레퍼런스> [<타겟>]` | 디자인 추출 → 토큰 적용 → Playground 생성 → 규칙 문서화 |
+
+**핵심 설계 원칙 (수정 시 반드시 유지):**
+
+1. **PrimeNG preset 색상값 하드코딩 금지** — 반드시 `var(--*)` CSS 변수 참조 (Tailwind와 단일 소스 공유)
+2. **소스코드 우선 추출** — Playwright는 검증 보조용, dev 서버 자동 시작 금지
+3. **백업 후 수정** — `styles.css`, `app.config.ts`, `CLAUDE.md` 수정 전 `.design-sync/backup-{ts}/` 생성
+4. **멱등성 보장** — CLAUDE.md 마커(`<!-- KAI-DESIGN-RULES:START/END -->`) 기반 교체로 재실행 안전
+5. **Playground lazy load** — `loadComponent: () => import(...)` 방식 강제
+6. **sections/ 분할** — 카테고리별 컴포넌트 분리 (tokens/buttons/forms/data-display/feedback/navigation/overlay)
+7. **폰트 복사 금지** — 외부 폰트 URL만 기록, 라이선스 확인은 사용자 몫
+8. **레퍼런스 읽기 전용** — 레퍼런스 프로젝트 파일 쓰기 금지
+
+---
+
+### meeting-to-spec
+
+미팅 녹취록을 다부서(BA → 운영 → 시장/마케팅 → 개발 → 사장) 페르소나로 분해하여
+데모/MVP 직전까지 사용 가능한 7개 산출물을 생성하는 파이프라인.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-meeting-to-spec | `/kai-meeting-to-spec <폴더> [--auto]` | 녹취록 폴더 → output/ 7개 산출물 |
+
+**핵심 설계 원칙 (수정 시 반드시 유지):**
+
+1. **Fresh context per stage** — 각 Stage = 별도 role agent Opus 호출. 페르소나 간 컨텍스트 오염 차단
+2. **_TRACE.md 필독** — 모든 role agent는 작업 전 게이트 피드백·과거 결정 누적 파일 필독
+3. **단일 spec-advisor** — 7개로 쪼개지 않음 (role agent가 페르소나, advisor는 generic meta)
+4. **모든 인용에 원문 라인 번호** — 환각 방지, 후속 검증 가능
+5. **3계층 + 1특수 태깅** — 🟢 명시 / 🟡 암묵 / 🔴 누락추가 / 🔶 확인 필요
+6. **녹취록 외부 데이터 환각 금지** — 시장 규모·경쟁사 등은 🔶로만 표시
+7. **자동 모드 안전망** — 금전·법적·외부 발송 결정은 자동화 금지 (BO 확인 필수로만 표시)
+8. **재현성** — 동일 입력 → 동일 파일명·구조 (Stage00~Stage06 + README + apps/)
+9. **단일/부분 실행** — `--stage=N` / `--from=N` 지원 (단 전제 단계 산출 검증)
+10. **단계 순서 엄수** — Stage 0 → 1 → 2 → 3 → 4 → 5 → 6 (m2s-design)
+
+---
+
 ## 작업 시 준수 규칙
 
 ### 1. 스킬 수정 시
 
 - **모든 스킬은 markdown 지시문**이다. 코드가 아니다.
 - 새로운 안전 규칙을 추가할 때는 **이미 정의된 9개 핵심 설계 원칙과 충돌하지 않는지** 확인.
-- task-add/task-run/task-clear 간 **일관성 유지** (예: 영향 파일 포맷, 타임스탬프 형식, 락 파일 경로).
+- task-add/kai-task-run/kai-task-clear 간 **일관성 유지** (예: 영향 파일 포맷, 타임스탬프 형식, 락 파일 경로).
 - 작업 단계 번호(Step N)를 변경할 때는 cross-reference (다른 Step에서 언급하는 곳) 모두 갱신.
 
 ### 2. 새 스킬 추가 시
@@ -115,10 +172,10 @@ allowed-tools:               # 사용 허용 툴 명시
 스킬 파일 수정 후:
 1. 심볼릭 링크 무결성 확인:
    ```bash
-   ls -la ~/.claude/skills/task-add ~/.claude/skills/task-run ~/.claude/skills/task-clear ~/.claude/agents/advisor.md
+   ls -la ~/.claude/skills/kai-task-add ~/.claude/skills/kai-task-run ~/.claude/skills/kai-task-clear ~/.claude/agents/advisor.md
    ```
 2. 새 Claude Code 세션을 열어 스킬이 정상 로드되는지 확인.
-3. 실제 프로젝트(예: dev2)에서 `/task-add` 시험 호출.
+3. 실제 프로젝트(예: dev2)에서 `/kai-task-add` 시험 호출.
 
 ---
 
@@ -166,11 +223,11 @@ allowed-tools:               # 사용 허용 툴 명시
 bash /Volumes/KAIFACUN/Projects/Skills/task-manager/install.sh
 
 # 심볼릭 링크 확인
-ls -la ~/.claude/skills/task-add ~/.claude/skills/task-run ~/.claude/skills/task-clear ~/.claude/agents/advisor.md
+ls -la ~/.claude/skills/kai-task-add ~/.claude/skills/kai-task-run ~/.claude/skills/kai-task-clear ~/.claude/agents/advisor.md
 
 # 어떤 프로젝트에서 시험
 cd /Volumes/KAIFACUN/Projects/{project}
-# 이후 Claude Code 세션에서 /task-add, /task-run, /task-clear 시험
+# 이후 Claude Code 세션에서 /kai-task-add, /kai-task-run, /kai-task-clear 시험
 
 # 백그라운드 루프 일시 정지 (시험 중)
 touch /Volumes/KAIFACUN/Projects/{project}/.claude/user.lock
