@@ -68,9 +68,38 @@ Step 0 완료 후 다음을 사용자에게 보고:
 
 ---
 
-### Step 1 — 디자인 토큰 추출
+### Step 1 — 레퍼런스 타입 감지 및 디자인 토큰 추출
 
-레퍼런스 타입에 따라 분기한다.
+먼저 레퍼런스 타입을 감지하고, 타입별로 적합한 추출 전략을 선택한다.
+
+#### 타입 감지
+
+```bash
+REF="{레퍼런스 경로}"
+
+# HTML 파일
+if [[ "$REF" == *.html ]]; then TYPE="html"; fi
+
+# 프로젝트 디렉토리 — package.json으로 스택 판별
+elif [ -f "$REF/package.json" ]; then
+  if grep -q '"next"' "$REF/package.json"; then TYPE="nextjs"
+  elif grep -q '"react"' "$REF/package.json"; then TYPE="react"
+  elif grep -q '"vue"' "$REF/package.json"; then TYPE="vue"
+  elif grep -q '"@angular/core"' "$REF/package.json"; then TYPE="angular"
+  else TYPE="generic"
+  fi
+
+# CSS/SCSS 단일 파일
+elif [[ "$REF" == *.css ]] || [[ "$REF" == *.scss ]]; then TYPE="css"
+
+# 기타
+else TYPE="unknown"
+fi
+```
+
+감지된 타입을 콘솔에 출력하고 해당 분기로 진행.
+
+---
 
 #### 1-A. 레퍼런스가 HTML 파일인 경우
 
@@ -95,17 +124,64 @@ Step 0 완료 후 다음을 사용자에게 보고:
 - `padding`/`gap`/`margin` 반복 값 수집
 - `box-shadow` 값 수집
 
-#### 1-B. 레퍼런스가 프로젝트 디렉토리인 경우
+#### 1-B. 레퍼런스가 Angular / Vue / Generic 프로젝트인 경우
 
-우선순위 순서로 탐색 (병렬 Grep):
+우선순위 순서로 병렬 탐색:
 
 ```bash
-# 병렬 실행
-grep -rn ":root" {REF}/src --include="*.css" --include="*.scss" | head -100 &
-grep -rn "@theme" {REF}/src --include="*.css" | head -50 &
-grep -rn "\$[a-z]" {REF}/src --include="*.scss" | grep -E "color|bg|surface|text|accent|border|radius|shadow" | head -100 &
-cat {REF}/tailwind.config.* 2>/dev/null &
+# CSS 변수 (:root)
+grep -rn ":root" {REF}/src --include="*.css" --include="*.scss" | head -100
+
+# Tailwind V4 @theme
+grep -rn "@theme" {REF}/src --include="*.css" | head -50
+
+# SCSS 변수
+grep -rn "\$[a-z]" {REF}/src --include="*.scss" | grep -Ei "color|bg|surface|text|accent|border|radius|shadow" | head -100
+
+# Tailwind config
+cat {REF}/tailwind.config.* 2>/dev/null
 ```
+
+#### 1-C. 레퍼런스가 React / Next.js 프로젝트인 경우
+
+React/Next.js는 CSS-in-JS, CSS Modules, Tailwind 등 다양한 패턴이 혼재하므로 아래 순서로 탐색:
+
+**① CSS 변수 / 글로벌 스타일 (최우선):**
+```bash
+# globals.css / global.css / variables.css / tokens.css 탐색
+find {REF}/src {REF}/styles {REF}/app -name "global*" -o -name "variable*" -o -name "token*" 2>/dev/null | head -10
+
+# :root 변수 추출
+grep -rn ":root" {REF}/src {REF}/styles {REF}/app --include="*.css" --include="*.scss" | head -100
+```
+
+**② Tailwind config:**
+```bash
+cat {REF}/tailwind.config.{js,ts,mjs,cjs} 2>/dev/null
+# Next.js의 경우 app/globals.css 내 @theme 블록도 확인
+grep -n "@theme" {REF}/app/globals.css 2>/dev/null | head -30
+```
+
+**③ Styled Components / Emotion (theme 객체):**
+```bash
+# theme.ts / theme.js / tokens.ts 파일 탐색
+find {REF}/src -name "theme.*" -o -name "tokens.*" -o -name "colors.*" 2>/dev/null | head -10
+```
+
+**④ CSS Modules (*.module.css):**
+```bash
+# 공통 변수 파일 탐색
+find {REF}/src -name "*.module.css" | head -5
+# 빈도 높은 클래스명 추출 (색상·간격 관련)
+grep -rh "color\|background\|border\|radius\|padding\|gap" {REF}/src --include="*.module.css" | head -60
+```
+
+**⑤ `next.config.*` 에서 CSS 플러그인 확인:**
+```bash
+cat {REF}/next.config.{js,ts,mjs} 2>/dev/null | head -30
+```
+
+추출 우선순위: CSS 변수 > Tailwind config > theme 객체 > CSS Modules 빈도 분석
 
 #### 1-C. 중간 산출물 저장
 
