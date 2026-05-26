@@ -25,8 +25,28 @@ allowed-tools:
 2. Playground 컴포넌트로 Tailwind vs PrimeNG 구현 비교 뷰 생성
 3. 디자인 규칙 문서화 + CLAUDE.md 자동 갱신
 
-**핵심 원칙:** PrimeNG preset의 색상값은 하드코딩하지 않고 반드시 `var(--*)` CSS 변수를 참조한다.
+**핵심 원칙 1 — 색상 토큰 공유:** PrimeNG preset의 색상값은 하드코딩하지 않고 반드시 `var(--*)` CSS 변수를 참조한다.
 → Tailwind와 PrimeNG가 동일 토큰 소스를 공유하여 한 곳만 수정해도 두 시스템이 동기화됨.
+
+**핵심 원칙 2 — rem 기준 통일:** `html { font-size: 87.5%; }` (= 14px)를 반드시 설정한다.
+→ PrimeNG는 모든 크기를 `rem`으로 생성하는데, 기준은 `html` root(기본 16px)이다. `87.5%`를 지정하면 `1rem = 14px`가 되어 Tailwind `body { font-size: 14px }`와 정확히 일치한다.
+
+**핵심 원칙 3 — 패딩은 semantic.formField에서, 폰트 크기는 CSS 직접 오버라이드:** 패딩은 `semantic.formField.paddingX/Y`가 `{form.field.*}` 토큰을 통해 Button·Input·Select 전체에 전파된다. 단, **폰트 크기(fontSize)는 전파되지 않는다.**
+→ Aura 프리셋의 `button.root`, `inputtext.root` 등은 기본 크기(default, non-sm/lg)에 `fontSize` 토큰이 없어 body 폰트(html 기준값)를 그대로 상속한다. `formField.fontSize`를 설정해도 버튼·인풋에 적용되지 않으므로, 반드시 styles.css에서 CSS 직접 오버라이드가 필요하다.
+
+**핵심 원칙 4 — 폰트 크기 정렬은 styles.css CSS 오버라이드로:** PrimeNG 버튼·인풋의 기본 폰트가 body 크기를 상속해 Tailwind보다 크게 보이면, styles.css에 아래 규칙을 추가한다. `:not(.p-*-sm):not(.p-*-lg)`로 sm/lg 변형은 보호한다.
+
+```css
+/* PrimeNG 폼 컴포넌트 기본 폰트 — Tailwind 기본 폰트에 맞춤 */
+.p-button:not(.p-button-sm):not(.p-button-lg),
+.p-inputtext:not(.p-inputtext-sm):not(.p-inputtext-lg),
+.p-select:not(.p-select-sm):not(.p-select-lg),
+.p-textarea:not(.p-textarea-sm):not(.p-textarea-lg),
+.p-password .p-inputtext {
+  font-size: {레퍼런스 버튼 폰트 크기를 rem으로 변환};
+}
+```
+→ unlayered CSS는 PrimeNG의 `primeng` layer보다 항상 우선하므로, 높은 신뢰도로 적용된다. sm/lg variant는 각자의 CSS 변수(--p-button-sm-font-size 등)로 이미 제어되므로 `:not()` 로 제외한다.
 
 ---
 
@@ -287,6 +307,8 @@ cp {TARGET}/src/styles.scss "$BACKUP_DIR/" 2>/dev/null
 
 #### 4-B. `src/styles/_tokens.css` 생성
 
+> ⚠️ **`html { font-size: 87.5%; }`는 필수** — PrimeNG가 `rem`으로 생성하는 모든 크기가 이 값(= 14px)을 기준으로 계산된다. 없으면 PrimeNG가 16px 기준으로 동작하여 Tailwind보다 크게 보인다.
+
 ```css
 /* ============================================
    디자인 토큰 — /kai-design-sync 자동 생성
@@ -362,15 +384,60 @@ cp {TARGET}/src/styles.scss "$BACKUP_DIR/" 2>/dev/null
   --shadow-md: 0 4px 16px -2px rgb(0 0 0 / 0.08);
   --shadow-modal: 0 16px 48px -8px rgb(0 0 0 / 0.16);
 }
+
+/* ✅ PrimeNG rem 기준값 통일 — 반드시 포함해야 함 */
+html {
+  font-size: 87.5%; /* = 14px — 1rem을 14px로 고정 */
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 1rem; /* = 14px */
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+  padding: 0;
+}
 ```
 
-#### 4-C. 메인 스타일 파일에 import 추가
+#### 4-C. 메인 스타일 파일에 import 추가 + PrimeNG 폰트 오버라이드
 
 `styles.css` 또는 `styles.scss` 상단에 아래 추가 (기존 내용 보존):
 
 ```css
 @import "tailwindcss";
 @import "./styles/_tokens.css";
+@import "tailwindcss-primeui";
+@import "primeicons/primeicons.css";
+
+/* ─────────────────────────────────────────────
+   PrimeNG 폰트 크기 보정 (필수)
+
+   Aura 프리셋의 button/inputtext/select 등 기본(default) 크기에는
+   fontSize 토큰이 없어 body 폰트(html 기준값)를 그대로 상속함.
+   → formField.fontSize 설정만으로는 효과 없음. CSS 직접 오버라이드 필수.
+
+   {레퍼런스_폰트크기_rem}: 레퍼런스 HTML의 버튼/인풋 폰트를 rem으로 환산
+     예) html { font-size: 87.5% } (14px) 기준, 레퍼런스 버튼이 12.5px → 0.875rem
+         html { font-size: 93.75% } (15px) 기준, 레퍼런스 버튼이 text-sm → 0.875rem
+
+   unlayered CSS는 PrimeNG의 'primeng' layer보다 항상 우선 적용됨.
+   :not(.p-*-sm):not(.p-*-lg) — sm/lg variant는 각자 CSS 변수로 이미 제어됨, 제외 필수.
+   ────────────────────────────────────────────── */
+.p-button:not(.p-button-sm):not(.p-button-lg),
+.p-inputtext:not(.p-inputtext-sm):not(.p-inputtext-lg),
+.p-select:not(.p-select-sm):not(.p-select-lg),
+.p-textarea:not(.p-textarea-sm):not(.p-textarea-lg),
+.p-password .p-inputtext,
+.p-multiselect:not(.p-multiselect-sm):not(.p-multiselect-lg),
+.p-datepicker-input,
+.p-inputnumber-input {
+  font-size: {레퍼런스_폰트크기_rem};
+}
 ```
 
 ---
@@ -379,7 +446,11 @@ cp {TARGET}/src/styles.scss "$BACKUP_DIR/" 2>/dev/null
 
 `{TARGET}/src/app/theme/{프로젝트명}-preset.ts`를 생성한다.
 
-**verida-console의 패턴을 그대로 따른다:**
+> ⚠️ **크기 제어 원칙:**
+> - `semantic.formField.paddingX/Y`는 `{form.field.padding.*}` 토큰을 통해 Button·Input·Select·Textarea 전체에 전파된다.
+> - **⚠️ `formField.fontSize`는 전파되지 않는다.** Aura의 `button.root`·`inputtext.root` 등 기본 크기(non-sm/lg)에는 fontSize 토큰이 없어 body 폰트(html 기준값)를 그대로 상속한다. → styles.css에서 CSS 직접 오버라이드 필수 (핵심 원칙 4 참조)
+> - `html { font-size: N% }` 기준값이 설정되어 있으므로 `1rem = 기준 px`로 계산한다.
+> - `components.button.root`에는 `borderRadius`·`label.fontWeight`만 지정한다. `paddingX/Y/sm/lg`를 별도로 넣으면 formField 상속이 깨져 버튼만 비정상적으로 커진다.
 
 ```typescript
 import { definePreset } from '@primeuix/themes';
@@ -509,24 +580,65 @@ export const {프로젝트명}Preset = definePreset(Aura, {
     focusRing: { width: '2px', style: 'solid', color: 'var(--accent)', offset: '2px' },
     disabledOpacity: '0.5',
     formField: {
-      paddingX: '0.75rem', paddingY: '0.4375rem', fontSize: '0.8125rem',
-      sm: { fontSize: '0.75rem', paddingX: '0.625rem', paddingY: '0.25rem' },
-      lg: { fontSize: '0.875rem', paddingX: '1.125rem', paddingY: '0.625rem' },
+      // ✅ html { font-size: N% } 기준으로 rem 계산
+      // ⚠️ fontSize를 여기 설정해도 button/inputtext 기본 크기에 적용되지 않음 (Aura 구조적 한계)
+      //    → styles.css에서 .p-button/.p-inputtext 등 직접 CSS 오버라이드 필수 (핵심 원칙 4)
+      paddingX: '0.75rem',   // 패딩은 {form.field.padding.x}로 전파됨 ✓
+      paddingY: '0.5rem',    // 패딩은 {form.field.padding.y}로 전파됨 ✓
+      sm: { fontSize: '0.875rem', paddingX: '0.625rem', paddingY: '0.3125rem' },
+      lg: { fontSize: '1.125rem', paddingX: '1.125rem', paddingY: '0.625rem' },
       borderRadius: 'var(--radius)',
       focusRing: { width: '2px', style: 'solid', color: 'var(--accent)', offset: '0', shadow: 'none' },
     },
     colorScheme: { light: scheme, dark: scheme },
   },
   components: {
-    toast: { colorScheme: { light: { info: toastSeverity, success: toastSeverity, warn: toastSeverity, error: toastSeverity, secondary: toastSeverity, contrast: toastSeverity }, dark: { info: toastSeverity, success: toastSeverity, warn: toastSeverity, error: toastSeverity, secondary: toastSeverity, contrast: toastSeverity } } },
+    button: {
+      root: {
+        // ✅ borderRadius·fontWeight만 오버라이드 — 패딩/폰트는 semantic.formField 전역 상속
+        borderRadius: '999px', // pill 디자인이 아닌 경우 'var(--radius)'로 교체
+        label: { fontWeight: '600' },
+        // ❌ paddingX/paddingY/sm/lg 오버라이드 금지 — formField 상속 깨짐
+      },
+    },
+    tag: {
+      root: {
+        fontSize: '0.75rem',       // ~10.5px at 14px root
+        fontWeight: '600',
+        borderRadius: '999px',
+        roundedBorderRadius: '999px',
+        padding: '0.25rem 0.625rem',
+        gap: '0.3125rem',
+      },
+    },
+    dialog: {
+      root: { borderRadius: '22px' },
+    },
+    toast: {
+      colorScheme: {
+        light: { info: toastSeverity, success: toastSeverity, warn: toastSeverity, error: toastSeverity, secondary: toastSeverity, contrast: toastSeverity },
+        dark:  { info: toastSeverity, success: toastSeverity, warn: toastSeverity, error: toastSeverity, secondary: toastSeverity, contrast: toastSeverity },
+      },
+    },
     datatable: {
       headerCell: { padding: '0.5rem 0.75rem' },
-      bodyCell: { padding: '0.5rem 0.75rem' },
+      bodyCell:   { padding: '0.5rem 0.75rem' },
       footerCell: { padding: '0.5rem 0.75rem' },
     },
   },
 });
 ```
+
+### PrimeNG ↔ Tailwind 크기 동기화 대조표
+
+| 항목 | Tailwind (html N%) | PrimeNG 제어 위치 | 비고 |
+|---|---|---|---|
+| **기본 폰트** | `text-sm` = 0.875rem | `styles.css` `.p-button` 등 CSS 오버라이드 | ⚠️ formField.fontSize는 button/input에 미전파 |
+| 기본 패딩 X | `px-3` = 0.75rem | `formField.paddingX: '0.75rem'` | `{form.field.padding.x}`로 전파됨 ✓ |
+| 기본 패딩 Y | `py-2` = 0.5rem | `formField.paddingY: '0.5rem'` | `{form.field.padding.y}`로 전파됨 ✓ |
+| sm 폰트 | `text-xs` | `formField.sm.fontSize` | sm/lg는 `{form.field.sm.font.size}`로 전파됨 ✓ |
+| 버튼 radius | `rounded-full` | `button.root.borderRadius: '999px'` | ✓ |
+| 태그 폰트 | `text-xs` | `tag.root.fontSize` | 컴포넌트 직접 지정 ✓ |
 
 #### 5-A. app.config.ts에 preset 등록
 
@@ -580,24 +692,82 @@ src/app/pages/playground/
     └── overlay/                  # 모달·드로어·드롭다운
 ```
 
-#### 6-C. 각 Section 구조
+#### 6-C. Playground 레이아웃 — 단일 스크롤 페이지
 
-각 section 컴포넌트 내부는 **두 탭**으로 구성:
-- 탭 1: `[Tailwind]` — Tailwind 유틸리티 클래스로 구현
-- 탭 2: `[PrimeNG]` — PrimeNG 컴포넌트로 구현
+Playground는 **탭 방식이 아닌 단일 스크롤 페이지**로 구성한다.
+- 상단에 sticky 헤더 + 앵커 네비게이션 버튼
+- 각 섹션은 `id` 속성을 가지며 스무스 스크롤로 이동
+- 섹션 구분은 `.pg-section-divider` 클래스 사용
 
-두 탭은 **시각적으로 완전히 동일**해야 한다. 동일한 `var(--*)` CSS 변수를 사용하기 때문에 보장된다.
+**playground.component.ts:**
+```typescript
+@Component({ ... })
+export class PlaygroundComponent {
+  sections = [
+    { id: 'tokens', label: '토큰' },
+    { id: 'buttons', label: '버튼' },
+    { id: 'forms', label: '폼' },
+    // ...
+  ];
+  scrollTo(id: string) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+```
 
-탭 구현 예시 (Angular + PrimeNG p-tabs):
+**playground.component.html 패턴:**
 ```html
-<p-tabs>
-  <p-tabpanel header="Tailwind">
-    <!-- Tailwind 유틸리티 클래스 구현 -->
-  </p-tabpanel>
-  <p-tabpanel header="PrimeNG">
-    <!-- PrimeNG 컴포넌트 구현 -->
-  </p-tabpanel>
-</p-tabs>
+<!-- sticky 헤더 + 앵커 네비 -->
+<div class="border-b border-[var(--line)] bg-[var(--surface)] sticky top-0 z-10">
+  <div class="max-w-[1280px] mx-auto px-7 py-3.5 flex items-center gap-6">
+    <!-- 브랜드 로고 영역 -->
+    <div class="flex gap-1">
+      @for (s of sections; track s.id) {
+        <button class="px-3.5 py-[6px] rounded-full ..."
+          (click)="scrollTo(s.id)">{{ s.label }}</button>
+      }
+    </div>
+  </div>
+</div>
+
+<!-- 전체 섹션 스크롤 뷰 -->
+<div class="max-w-[1280px] mx-auto px-7 py-10 flex flex-col gap-16">
+  <div id="tokens">
+    <div class="pg-section-divider">토큰</div>
+    <app-tokens-section />
+  </div>
+  <div id="buttons">
+    <div class="pg-section-divider">버튼</div>
+    <app-buttons-section />
+  </div>
+  <!-- ... 나머지 섹션 -->
+</div>
+```
+
+#### 6-D. 각 Section 내부 구조
+
+각 section 컴포넌트 내부는 **두 블록**으로 구성:
+- 블록 1: `[Tailwind]` 레이블 + Tailwind 유틸리티 클래스 구현
+- 블록 2: `[PrimeNG]` 레이블 + PrimeNG 컴포넌트 구현
+
+두 블록은 **시각적으로 완전히 동일**해야 한다. 동일한 `var(--*)` CSS 변수를 사용하기 때문에 보장된다.
+
+```html
+<!-- section 내부 구조 예시 -->
+<div class="space-y-6">
+  <div>
+    <div class="pg-tab-label">Tailwind</div>
+    <div class="pg-tab-content">
+      <!-- Tailwind 유틸리티 클래스 구현 -->
+    </div>
+  </div>
+  <div>
+    <div class="pg-tab-label">PrimeNG</div>
+    <div class="pg-tab-content">
+      <!-- PrimeNG 컴포넌트 구현 -->
+    </div>
+  </div>
+</div>
 ```
 
 #### 6-D. Step 2 컴포넌트 인벤토리 기준으로 각 section 구현
@@ -717,3 +887,7 @@ Step 2에서 추출한 컴포넌트 목록을 기반으로 실제 HTML/TS를 작
 - ❌ **Tailwind V3 / PrimeNG V20 이하 / Angular V20 이하**에서 강제 진행
 - ❌ **CLAUDE.md 마커 없이 디자인 섹션 전체 교체** — 마커 기반으로만 교체
 - ❌ **단일 Playground 컴포넌트에 모든 요소 집어넣기** — 반드시 sections/ 분할
+- ❌ **`html { font-size: 87.5% }` 누락** — PrimeNG가 16px 기준으로 동작하여 Tailwind보다 크게 보임. `_tokens.css`에 반드시 포함
+- ❌ **`components.button.root`에 `paddingX/paddingY/sm/lg` 오버라이드** — `semantic.formField`의 전역 상속이 깨져 버튼만 비정상적으로 커짐. 패딩은 formField에서만 제어
+- ❌ **`formField.fontSize`만 설정하고 styles.css 오버라이드 생략** — Aura button/inputtext root에 fontSize 토큰 없어 body 폰트 상속됨. PrimeNG 기본 컴포넌트 폰트는 반드시 styles.css에서 `.p-button`, `.p-inputtext` 등 직접 CSS 오버라이드 필요 (핵심 원칙 4)
+- ❌ **styles.css 폰트 오버라이드에서 sm/lg 변형 제외 누락** — `.p-button { font-size: X }` 단독 작성 시 sm/lg variant도 덮어씀. `:not(.p-button-sm):not(.p-button-lg)` 반드시 추가
