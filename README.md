@@ -5,16 +5,38 @@ Claude Code 전역 스킬 모음. 각 스킬 그룹은 독립 폴더로 관리�
 
 ## 스킬 그룹
 
+### meeting-to-spec
+
+고객 미팅 녹취록을 다부서(BA → 운영 → 시장/마케팅 → 개발 → 사장) 파이프라인으로
+분해하여 데모/MVP 직전까지 사용 가능한 사양 문서 세트(7개 파일)를 생성한다.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-meeting-to-spec | `/kai-meeting-to-spec <폴더> [--auto]` | 녹취록 폴더 → output/ 7개 산출물 |
+
+설치:
+```bash
+bash /Volumes/KAIFACUN/Projects/Skills/meeting-to-spec/install.sh
+```
+
+설치 스크립트는 다음을 수행:
+- `~/.claude/skills/kai-meeting-to-spec/SKILL.md` 심볼릭 링크 생성
+- `~/.claude/agents/spec-advisor.md` 심볼릭 링크 생성 (Opus PM/BA 자문)
+
+대화형 모드는 단계마다 게이트 확인, `--auto` 모드는 spec-advisor에게 모호한 질문 위임.
+
+---
+
 ### task-manager
 
-체크리스트 기반 작업 관리. 어느 프로젝트에서도 `/task-add`, `/task-run`, `/task-clear` 명령으로
+체크리스트 기반 작업 관리. 어느 프로젝트에서도 `/kai-task-add`, `/kai-task-run`, `/kai-task-clear` 명령으로
 **다중 에이전트 안전한** 작업 큐를 운영한다.
 
 | 스킬 | 명령 | 역할 |
 |---|---|---|
-| task-add | `/task-add {설명}` | `docs/check-list.md`에 항목 추가 (영향 파일 의무 기록) |
-| task-run | `/task-run` | 미시작 항목 선점 → 완수 → 완료 처리 |
-| task-clear | `/task-clear` | 완료 항목 → `docs/check-list-done.md`로 이동 |
+| kai-task-add | `/kai-task-add {설명}` | `docs/check-list.md`에 항목 추가 (영향 파일 의무 기록) |
+| kai-task-run | `/kai-task-run` | 미시작 항목 선점 → 완수 → 완료 처리 |
+| kai-task-clear | `/kai-task-clear` | 완료 항목 → `docs/check-list-done.md`로 이동 |
 
 설치:
 ```bash
@@ -81,9 +103,9 @@ task-run의 git 단계는 `pull --rebase` 후 push, 실패 시 최대 3회 재�
 
 ### 7. 컨텍스트 누적 자동 방지
 
-`- [x]` 항목이 10개 이상이면 task-add/task-run 실행 시 자동으로 오래된 것부터 `check-list-done.md` 로 이동.
+`- [x]` 항목이 10개 이상이면 task-add/kai-task-run 실행 시 자동으로 오래된 것부터 `check-list-done.md` 로 이동.
 **최근 5개**는 Tier 2 자문 참조용으로 보존.
-사용자가 `/task-clear` 를 까먹어도 매 호출마다 누적되어 컨텍스트가 폭증하는 사고를 방지.
+사용자가 `/kai-task-clear` 를 까먹어도 매 호출마다 누적되어 컨텍스트가 폭증하는 사고를 방지.
 
 ---
 
