@@ -1,8 +1,8 @@
 ---
-name: task-clear
+name: kai-task-clear
 description: |
   현재 프로젝트의 docs/check-list.md에서 완료된 항목을 docs/check-list-done.md로 이동하는 전역 스킬.
-  트리거: /task-clear
+  트리거: /kai-task-clear
 allowed-tools:
   - Read
   - Edit
@@ -10,7 +10,7 @@ allowed-tools:
   - Bash
 ---
 
-# task-clear — 완료 항목 아카이브 스킬
+# kai-task-clear — 완료 항목 아카이브 스킬
 
 ## 역할
 

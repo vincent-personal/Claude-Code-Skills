@@ -1,9 +1,9 @@
 ---
-name: task-add
+name: kai-task-add
 description: |
   현재 프로젝트의 docs/check-list.md에 새 작업 항목을 추가하는 전역 스킬.
-  트리거: /task-add
-  사용법: /task-add {작업 설명}
+  트리거: /kai-task-add
+  사용법: /kai-task-add {작업 설명}
 allowed-tools:
   - Read
   - Edit
@@ -13,7 +13,7 @@ allowed-tools:
   - Glob
 ---
 
-# task-add — 작업 체크리스트 추가 스킬
+# kai-task-add — 작업 체크리스트 추가 스킬
 
 ## 역할
 
@@ -21,18 +21,44 @@ allowed-tools:
 번호가 증가하는 체크 항목으로 추가한다.
 **영향 파일을 의무적으로 기록**하여 다중 에이전트 환경에서 파일 충돌을 방지한다.
 
+> ⚠️ **절대 원칙**: 이 스킬은 **체크리스트 항목 추가 전용**이다.
+> 사용자가 "구현해줘", "만들어줘", "코드 짜줘" 등 무엇을 요청해도,
+> 이 스킬은 check-list.md에 항목을 **추가하고 종료**한다.
+> 코드 생성·파일 편집·빌드·테스트 등 구현 행위는 **일체 하지 않는다**.
+> 구현 실행은 `/kai-task-run` 스킬의 역할이다.
+
 ---
 
 ## ⚡ 실행 절차
 
-### Step 0 — 프로젝트 루트 탐지
+### Step 0 — 세션 루트 탐지 (최우선 규칙)
 
-```bash
-git rev-parse --show-toplevel 2>/dev/null || pwd
-```
+> ⛔ **절대 금지**: `git rev-parse --show-toplevel` 또는 `pwd` 명령으로 SESSION_ROOT를 결정하지 않는다.
+> 이 명령은 하위 프로젝트의 git root를 반환하므로 하위 프로젝트 폴더에 check-list.md가 생성된다.
 
-이 결과를 `PROJECT_ROOT`로 사용한다.
-체크리스트 경로: `{PROJECT_ROOT}/docs/check-list.md`
+**체크리스트는 반드시 Claude Code 세션이 열린 폴더(= 워크스페이스 루트)에 생성한다.**
+작업 대상이 하위 프로젝트(`verida-ops`, `verida-order` 등)이더라도, check-list.md는 그 하위 프로젝트 폴더가 아닌 **세션 루트**에 만든다.
+
+**SESSION_ROOT 결정 방법 (우선순위 순):**
+
+1. **Claude Code 시스템 컨텍스트의 `Primary working directory` 값**을 그대로 사용한다.
+   - 대화 시작 시 시스템 프롬프트에 `Primary working directory: /path/to/workspace` 형태로 명시됨.
+   - 이 값이 SESSION_ROOT다.
+
+2. 위 값을 찾을 수 없으면 — 현재 디렉토리에서 상위로 올라가며 CLAUDE.md를 탐색, **가장 상위의 CLAUDE.md가 있는 디렉토리**를 SESSION_ROOT로 사용:
+   ```bash
+   path=$(pwd)
+   last_found=$path
+   while [ "$path" != "/" ]; do
+     [ -f "$path/CLAUDE.md" ] && last_found="$path"
+     path=$(dirname "$path")
+   done
+   echo "$last_found"
+   ```
+
+체크리스트 경로: `{SESSION_ROOT}/docs/check-list.md`
+
+> **검증**: 경로를 결정한 후, 경로에 하위 프로젝트 폴더명(`verida-ops/`, `verida-order/`, `verida-landing/` 등)이 포함되어 있으면 잘못된 경로다 — 상위 디렉토리로 올라간다.
 
 ---
 
@@ -46,7 +72,7 @@ git rev-parse --show-toplevel 2>/dev/null || pwd
 # 작업 체크리스트
 
 > 생성: {YYYY-MM-DD}
-> 본 파일은 /task-run 스킬이 자율 실행하며 관리한다.
+> 본 파일은 /kai-task-run 스킬이 자율 실행하며 관리한다.
 
 ---
 
@@ -72,9 +98,9 @@ git rev-parse --show-toplevel 2>/dev/null || pwd
 
 ## 자동 아카이브 정책
 
-`- [x]` 항목이 **10개 이상**이면 task-add/task-run 실행 시 자동으로 가장 오래된 것부터 `check-list-done.md` 로 이동.
+`- [x]` 항목이 **10개 이상**이면 task-add/kai-task-run 실행 시 자동으로 가장 오래된 것부터 `check-list-done.md` 로 이동.
 **최근 5개**는 Tier 2 자문 참조용으로 본 파일에 보존.
-사용자가 `/task-clear` 를 까먹어도 컨텍스트가 무한히 부풀지 않도록 하는 안전장치.
+사용자가 `/kai-task-clear` 를 까먹어도 컨텍스트가 무한히 부풀지 않도록 하는 안전장치.
 
 ---
 
@@ -243,6 +269,35 @@ git push
 _작업 시작 시: `- [ ]` → `- [~]` 로 변경 (다른 에이전트 중복 착수 방지)._
 _작업 완료 시: `- [~]` → `- [x]` 로 변경하고 완료 내용을 기록함._
 ~~~~
+
+---
+
+### Step 0-C — 프로젝트 컨벤션 파일 확인 (필수)
+
+**컨벤션 파일이 존재하면 반드시 읽는다. 영향 파일 식별·작업 설명 작성의 기준이 된다.**
+
+```bash
+# 워크스페이스 최상위 CLAUDE.md
+[ -f "{SESSION_ROOT}/CLAUDE.md" ] && echo "워크스페이스 CLAUDE.md 존재"
+
+# 작업 대상 앱 탐지 (사용자 요청에서 "ops", "order", "pulse", "landing" 등 파악)
+# 앱 레벨 CLAUDE.md 및 FRONTEND-CONVENTIONS.md 경로 예시:
+#   {SESSION_ROOT}/verida-ops/CLAUDE.md
+#   {SESSION_ROOT}/verida-ops/docs/FRONTEND-CONVENTIONS.md
+```
+
+읽는 순서:
+1. `{SESSION_ROOT}/CLAUDE.md` — 워크스페이스 공통 컨벤션 (항상)
+2. `{SESSION_ROOT}/{앱}/CLAUDE.md` — 앱 레벨 컨벤션 (해당 앱 작업 시)
+3. `{SESSION_ROOT}/{앱}/docs/FRONTEND-CONVENTIONS.md` — 상세 프론트엔드 규칙 (파일이 존재하면)
+
+**이 파일들에서 확인해야 할 항목:**
+- 컴포넌트 네이밍 규칙 (`view-`, `drawer-`, `dialog-` 접두사 등)
+- 4-파일 세트 규칙 (`.ts`, `.html`, `.scss`, `.store.ts`)
+- 폴더 구조 및 store 배치 위치
+- 금지 사항 (Red Lines)
+
+파일이 존재하지 않으면 이 단계를 건너뛴다. 읽은 내용은 이후 Step 2(영향 파일 식별)·Step 3(작업 설명 작성)에 반영한다.
 
 ---
 
@@ -440,9 +495,20 @@ advisor 응답을 수신한 후:
 
 ## Red Lines (절대 금지)
 
-- ❌ 작업을 직접 실행하거나 코드를 수정하는 행위
+- ❌ **작업을 직접 실행하거나 코드를 수정하는 행위** — 이 스킬은 체크리스트 항목 추가 **전용**이다. 파일 생성·편집·삭제·빌드·테스트 등 일체의 구현 행위 금지
+- ❌ **스스로 구현을 시작하는 행위** — 사용자가 "구현해줘", "만들어줘" 등을 요청해도, 이 스킬은 check-list.md에 항목을 추가하는 것으로 역할이 끝난다. 구현은 `/kai-task-run` 스킬이 담당한다
 - ❌ 체크박스를 `[x]`로 표시하는 행위
 - ❌ `- [~]`(작업중) 항목 수정·삭제·병합
 - ❌ 번호 순서 건너뛰기 (항상 max+1)
 - ❌ **영향 파일 없이 항목 추가** (충돌 검사 무력화)
 - ❌ 세부 내용 없이 제목만 추가
+
+---
+
+## ⚡ 역할 경계 (최우선 원칙)
+
+> **이 스킬의 유일한 출력은 `docs/check-list.md` 파일의 항목 추가뿐이다.**
+
+- `/kai-task-add` → 항목 추가 후 **즉시 종료** (구현 시작 금지)
+- 구현 실행 → `/kai-task-run` 스킬이 담당
+- 사용자가 구현을 요청해도 → check-list에 항목 추가 + "구현을 시작하려면 `/kai-task-run`을 실행하세요" 안내 후 종료

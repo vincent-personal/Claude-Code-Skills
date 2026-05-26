@@ -1,8 +1,8 @@
 ---
-name: task-run
+name: kai-task-run
 description: |
   현재 프로젝트의 docs/check-list.md에서 미시작 항목 하나를 선점하고 완수하는 전역 스킬.
-  트리거: /task-run
+  트리거: /kai-task-run
   다중 에이전트 환경에서 [~] 선점 마커 + 영향 파일 충돌 검사로 안전성 확보.
 allowed-tools:
   - Read
@@ -14,7 +14,7 @@ allowed-tools:
   - Agent
 ---
 
-# task-run — 작업 실행 스킬
+# kai-task-run — 작업 실행 스킬
 
 ## 🤖 자율 실행 원칙 (최상위 규칙 — 모든 Step보다 우선)
 
@@ -27,6 +27,7 @@ allowed-tools:
 - ✅ 여러 선택지 → 프로젝트 컨벤션에 맞는 것 자동 선택, 사유 기록
 - ✅ 파일 수정, 빌드 실행, git 커밋·푸시 → 모두 확인 없이 즉시 실행
 - ✅ 막히면 자체 판단으로 해결 시도, 완전히 불가능한 경우에만 `[!]` 마킹 후 종료
+- ✅ **한 항목 수정 완료 → 즉시 커밋** — 여러 항목을 묶어서 커밋하지 않는다. 항목 하나가 끝날 때마다 반드시 커밋한다.
 
 ---
 
@@ -75,7 +76,7 @@ git rev-parse --show-toplevel 2>/dev/null || pwd
 이 경로를 `PROJECT_ROOT`로 고정한다.
 체크리스트 경로: `{PROJECT_ROOT}/docs/check-list.md`
 
-파일이 없으면 "체크리스트가 없습니다. `/task-add`로 먼저 작업을 등록하세요." 보고 후 종료.
+파일이 없으면 "체크리스트가 없습니다. `/kai-task-add`로 먼저 작업을 등록하세요." 보고 후 종료.
 
 ---
 
@@ -260,9 +261,42 @@ advisor 응답의 "영향 범위"에서 **새로 발견된 파일**이 있으면
 
 ---
 
+### Step 4-C — 프로젝트 컨벤션 파일 확인 (필수 — 코드 작성 전)
+
+**코드를 한 줄이라도 작성하기 전에 반드시 컨벤션 파일을 읽는다.**
+컨벤션 파일이 정한 네이밍·폴더 구조·store 패턴을 따르지 않으면 리뷰 거부 사유가 된다.
+
+작업 항목의 **영향 파일 경로**에서 앱을 탐지한다 (예: `verida-ops/...` → verida-ops).
+
+읽는 순서:
+1. `{SESSION_ROOT}/CLAUDE.md` — 워크스페이스 공통 컨벤션 (`★ 공통 프론트엔드 컨벤션` 섹션 필독)
+2. `{SESSION_ROOT}/{앱}/CLAUDE.md` — 앱 레벨 컨벤션
+3. `{SESSION_ROOT}/{앱}/docs/FRONTEND-CONVENTIONS.md` — 상세 프론트엔드 규칙 **(파일이 있으면 반드시 읽음)**
+
+```bash
+# 앱 디렉토리 예시 (영향 파일 경로 기반 탐지)
+APP_DIR="{SESSION_ROOT}/verida-ops"   # 또는 verida-order, verida-pulse 등
+
+CONV="${APP_DIR}/docs/FRONTEND-CONVENTIONS.md"
+[ -f "$CONV" ] && echo "컨벤션 파일 존재 — 읽기 필수"
+```
+
+**코드 작성 전 반드시 확인할 항목 (컨벤션 파일에서):**
+- 컴포넌트 네이밍: `view-{domain}`, `drawer-{action}`, `dialog-{purpose}` 접두사
+- 4-파일 세트: `.ts` + `.html` + `.scss`(항상) + `.store.ts`(UI 상태 있을 때)
+- 클래스명: `View{X}Component`, `Drawer{Y}Component`
+- Store 패턴: `signalStore()` + `withDevtools()`
+- Store 배치: UI 상태 → 컴포넌트 폴더, 도메인 데이터 → `core/stores/`
+- 금지 사항 (Red Lines): hex 하드코딩, `@Injectable + plain signal`, `.scss` 생략 등
+
+파일이 존재하지 않으면 이 단계를 건너뛴다.
+
+---
+
 ### Step 5 — 코드 작성 (Sonnet 구현)
 
 advisor 자문(Tier 3) 또는 자체 분석(Tier 1/2)을 바탕으로 코드 작성.
+**Step 4-C에서 읽은 컨벤션 파일의 규칙을 그대로 적용한다.**
 
 **파일 수정 전 반드시 확인:**
 
@@ -310,19 +344,102 @@ exit $BUILD_RESULT
 
 ---
 
-### Step 7 — Git 커밋·푸시 (선택, 프로젝트 규칙 따름)
+### Step 7 — Git 커밋 (필수 — 항목 하나 완료 = 커밋 하나)
 
-체크리스트에 git 절차가 정의되어 있으면 그것을 따른다. 일반 절차:
+> ⚠️ **이 단계는 선택이 아니다.** 빌드가 통과한 모든 작업은 반드시 커밋한다.
+> **한 항목 수정이 끝나면 즉시 커밋한다. 여러 항목 완료 후 한꺼번에 커밋하지 않는다.**
+> push는 사용자가 명시적으로 요청할 때만 실행한다 (기본: 커밋만).
+
+**절차:**
+
+#### 7-A — appVersion 증가 (앱 CLAUDE.md 규칙 적용)
+
+커밋 직전, 프로젝트에 `src/environments/environment.ts` + `environment.prod.ts` 버전 파일이 존재하면 아래 절차로 버전을 올린다. **파일이 없으면 이 단계를 생략한다.**
+
+**① bump 레벨 결정 (우선순위 순):**
+
+1. **체크리스트 항목 본문에 명시된 경우 → 그것을 따른다**
+   - "MINOR 증가" 또는 "MINOR bump" 포함 → **MINOR**
+   - "MAJOR 증가" 또는 "MAJOR bump" 포함 → **MAJOR**
+   - "PATCH 증가" 또는 아무 명시 없음 → **PATCH**
+
+2. **명시 없으면 → 프로젝트 하위 앱 CLAUDE.md의 버전 규칙 참조 후 자체 판단**
+   - 파일 위치: `{PROJECT_ROOT}/verida-ops/CLAUDE.md` (또는 해당 하위 앱 CLAUDE.md) 내 `## ★ 버전 관리 규칙` 섹션
+   - verida-ops 기준:
+
+     | bump | 증가 조건 | 판단 기준 |
+     |---|---|---|
+     | **MINOR** | 신규 페이지·신규 기능·주요 UI 추가 | 새 `.ts`+`.html` 페이지 파일 생성, 신규 store/드로어/다이얼로그 컴포넌트 추가 |
+     | **MAJOR** | 전체 아키텍처 변경·대규모 리팩토링·정식 릴리스 | 폴더 구조 변경, 스택 교체, 전체 리팩토링 |
+     | **PATCH** | 버그픽스·CSS 수정·문구 변경·소규모 개선 | 기존 파일 수정, 스타일 조정, 오타 수정 |
+
+   - 판단이 MINOR/PATCH 경계에서 애매하면 → **PATCH** 선택 (보수적)
+
+**② 버전 계산 규칙:**
+
+```
+PATCH: X.Y.Z → X.Y.(Z+1)      Z ≥ 99이면 → X.(Y+1).0
+MINOR: X.Y.Z → X.(Y+1).0      Y ≥ 99이면 → (X+1).0.0
+MAJOR: X.Y.Z → (X+1).0.0
+```
+
+**③ bash 적용 (BUMP_LEVEL = "PATCH" | "MINOR" | "MAJOR"):**
+
+```bash
+VERSION_FILE="{PROJECT_ROOT}/src/environments/environment.ts"
+PROD_FILE="{PROJECT_ROOT}/src/environments/environment.prod.ts"
+
+[ -f "$VERSION_FILE" ] || { echo "버전 파일 없음 — skip"; }
+
+CURRENT=$(grep "appVersion" "$VERSION_FILE" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
+IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
+
+case "$BUMP_LEVEL" in
+  MAJOR)
+    MAJ=$((MAJ + 1)); MIN=0; PAT=0 ;;
+  MINOR)
+    MIN=$((MIN + 1)); PAT=0
+    [ "$MIN" -ge 99 ] && { MAJ=$((MAJ + 1)); MIN=0; } ;;
+  *)  # PATCH 기본
+    PAT=$((PAT + 1))
+    [ "$PAT" -ge 99 ] && { MIN=$((MIN + 1)); PAT=0; }
+    [ "$MIN" -ge 99 ] && { MAJ=$((MAJ + 1)); MIN=0; } ;;
+esac
+NEW_VERSION="$MAJ.$MIN.$PAT"
+
+sed -i '' "s/appVersion: '${CURRENT}'/appVersion: '${NEW_VERSION}'/" "$VERSION_FILE"
+[ -f "$PROD_FILE" ] && sed -i '' "s/appVersion: '${CURRENT}'/appVersion: '${NEW_VERSION}'/" "$PROD_FILE"
+
+git add "$VERSION_FILE" "$PROD_FILE" 2>/dev/null
+echo "버전 ${CURRENT} → ${NEW_VERSION} (${BUMP_LEVEL})"
+```
+
+#### 7-B — 커밋
 
 ```bash
 cd {PROJECT_ROOT}
 git pull --rebase                              # 다른 에이전트의 push 동기화
-git add {Step 5에서 수정한 파일들만}            # 영향 파일 외 파일 add 금지
-git commit -m "feat(#N): {제목}"
-git push                                       # rebase 실패하면 재시도 (최대 3회)
+git add {Step 5에서 수정·생성한 파일들만}       # 영향 파일 목록 기준, git add -A 금지
+git commit -m "$(cat <<'EOF'
+feat(ops #N): {제목 한 줄 요약}
+
+{변경 내용 2~4줄 bullet 요약}
+
+Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+EOF
+)"
 ```
 
-git 작업 실패 시 `[!]` 마킹.
+**커밋 규칙:**
+- 메시지 형식: `feat(ops #N): 제목` (N = 작업 번호)
+- `git add -A` / `git add .` 금지 — 영향 파일만 stage (버전 파일 포함)
+- `git pull --rebase` 실패 시 최대 3회 재시도
+- push는 사용자 명시 요청 시에만 실행
+
+**커밋 실패 시:**
+- rebase 충돌 → 충돌 파일 확인 후 자체 해결, 최대 3회
+- 3회 모두 실패 시 커밋 없이 `[!]` 마킹 후 사유 기록
+- 커밋 성공 여부와 무관하게 Step 8(완료 처리)은 반드시 실행
 
 ---
 
@@ -362,3 +479,7 @@ git 작업 실패 시 `[!]` 마킹.
 - ❌ `.claude/user.lock` 존재 시 무시하고 진행
 - ❌ 빌드 lock 무시하고 동시 빌드 강행
 - ❌ Step 5에서 수정하지 않은 파일까지 `git add`
+- ❌ 빌드 통과 후 커밋 생략 — Step 7은 매 작업마다 필수
+- ❌ `git add -A` 또는 `git add .` 사용 — 영향 파일만 stage
+- ❌ 여러 항목을 묶어서 커밋 — 반드시 항목 하나당 커밋 하나 (1 item = 1 commit)
+- ❌ 버전 파일이 존재하는데 PATCH 증가 생략 — 커밋마다 반드시 appVersion PATCH를 올린다

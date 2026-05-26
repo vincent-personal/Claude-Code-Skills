@@ -1,14 +1,14 @@
 ---
-name: task-list
+name: kai-task-list
 description: |
   현재 프로젝트의 docs/check-list.md에서 미완료 항목(미시작·진행중·확인필요)을 요약 출력하는 전역 스킬.
-  트리거: /task-list
+  트리거: /kai-task-list
 allowed-tools:
   - Read
   - Bash
 ---
 
-# task-list — 미완료 작업 목록 조회 스킬
+# kai-task-list — 미완료 작업 목록 조회 스킬
 
 ## 역할
 
@@ -27,7 +27,7 @@ git rev-parse --show-toplevel 2>/dev/null || pwd
 
 체크리스트 경로: `{PROJECT_ROOT}/docs/check-list.md`
 
-파일이 존재하지 않으면 "아직 체크리스트가 없습니다. `/task-add`로 첫 작업을 추가하세요." 보고 후 종료.
+파일이 존재하지 않으면 "아직 체크리스트가 없습니다. `/kai-task-add`로 첫 작업을 추가하세요." 보고 후 종료.
 
 ---
 
@@ -71,7 +71,7 @@ git rev-parse --show-toplevel 2>/dev/null || pwd
 ⚠️  확인필요 (N개)
   #3 — 제목  [파일: abc.ts]
 
-✅ 완료 항목 수: N개 (상세는 /task-clear 또는 check-list-done.md 참고)
+✅ 완료 항목 수: N개 (상세는 /kai-task-clear 또는 check-list-done.md 참고)
 ```
 
 모든 상태가 비어있으면:
