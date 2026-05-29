@@ -247,6 +247,7 @@ impact_files:
 predecessors: []
 claimed_at:
 claimed_by:
+committed:        # 커밋 성공 시 task-run이 해시 기록 (완료-고아 화해용)
 ---
 
 ## 작업 설명

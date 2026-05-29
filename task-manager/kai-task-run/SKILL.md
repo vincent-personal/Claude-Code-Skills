@@ -108,22 +108,31 @@ fi
 
 ---
 
-### Step 0-B — 좀비 선점 복구 + staging 고아 청소
+### Step 0-B — 완료-고아 화해 + 좀비 복구 + staging 고아 청소
+
+> ⚖️ **화해(reconciliation) 우선**: `doing/` 에 남은 파일이 `committed:` 마커를 가지면, 이는
+> "커밋은 됐으나 done/ 이동만 누락된 완료-고아"다. **재실행 없이 곧장 done/ 으로** 보낸다.
+> `committed:` 가 없는 것만 시간 기준 좀비로 본다. (중복 실행·중복 커밋 방지)
 
 ```bash
 NOW=$(date +%s)
-# 1) doing/ 좀비: claimed_at(또는 mtime) 30분 경과 → todo/ 로 되돌림
 for f in "{SESSION_ROOT}"/docs/tasks/doing/*.md; do
   [ -e "$f" ] || continue
+  # 1) 완료-고아: committed: 마커 존재 → 나이 무관하게 done/ 으로 화해 (재실행 금지)
+  if awk '/^---$/{c++; next} c==1 && /^committed:[[:space:]]*[0-9a-f]/{found=1} END{exit !found}' "$f"; then
+    mv "$f" "{SESSION_ROOT}/docs/tasks/done/$(basename "$f")"     # 완료 화해
+    continue
+  fi
+  # 2) 진짜 좀비: committed 없음 + mtime 30분 경과 → todo/ 로 복귀
   MT=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")
   if [ $((NOW - MT)) -gt 1800 ]; then
-    mv "$f" "{SESSION_ROOT}/docs/tasks/todo/$(basename "$f")"   # 좀비 복구
+    mv "$f" "{SESSION_ROOT}/docs/tasks/todo/$(basename "$f")"     # 좀비 복구
   fi
 done
-# 2) .staging/ 고아: 30분 경과한 미투입 temp 삭제
+# 3) .staging/ 고아: 30분 경과한 미투입 temp 삭제
 find "{SESSION_ROOT}/docs/tasks/.staging" -type f -mmin +30 -delete 2>/dev/null
 ```
-복구된 파일은 frontmatter의 `claimed_at`/`claimed_by` 를 비운다.
+좀비로 todo/ 에 복구된 파일은 frontmatter의 `claimed_at`/`claimed_by` 를 비운다(committed 화해 건은 그대로 둔다).
 
 ---
 
@@ -326,18 +335,52 @@ EOF
 ```
 - 메시지 형식: `feat(ops {id 짧은 접미, 예 a3f}): 제목` — 순차 #N 대신 task id 접미로 traceability 유지
 - `git add -A`/`git add .` 금지 — 영향 파일만 stage(버전 파일 포함)
-- `git pull --rebase` 실패 시 최대 3회 재시도. 3회 실패 시 커밋 없이 `mv doing→blocked` + 사유. **커밋 성공 여부와 무관하게 Step 7은 반드시 실행**
+
+#### 6-C — ★ 커밋 해시 마커 기록 (mv 이전 · 필수)
+
+커밋 **성공 직후, Step 7의 mv 이전에** task 파일 frontmatter에 커밋 해시를 기록한다(Edit).
+이 마커가 있어야, 혹시 mv가 누락돼도 Step 0-B 화해가 **재실행 없이** done/ 으로 보낼 수 있다.
+```bash
+HASH=$(cd {PROJECT_ROOT} && git rev-parse --short HEAD)
+# task 파일 frontmatter에 추가:  committed: {HASH}
+```
+
+#### 6-D — 커밋 실패 처리 (분기 명확화)
+
+> ⚠️ 어느 경우든 **doing/ 에 작업을 남긴 채 종료하지 않는다.**
+
+- `git pull --rebase` 또는 commit 실패 → 최대 3회 재시도
+- **3회 모두 실패** → `committed:` 마커를 쓰지 **않고** `mv doing→blocked` + 본문에 사유 기록 후 종료 (done 금지)
+- **커밋 성공** → 6-C로 마커 기록 → Step 7(done 이동)
+- 즉, **커밋 성공이면 done, 실패면 blocked.** "doing 잔류"는 어느 분기에도 없다.
 
 ---
 
-### Step 7 — 완료 처리 (mv doing→done)
+### Step 7 — 완료 처리 (mv doing→done) ★ 완료를 정의하는 행위
 
-성공 시 task 파일 본문에 완료 기록을 append(Edit)한 뒤 done/ 으로 이동:
+> 🔒 **이 mv가 곧 "완료"의 정의다.** 파일이 `done/` 에 들어가기 전에는 **절대 "완료" 보고를 하지 않는다.**
+> 산문으로 "작업을 마쳤습니다" 라고 말하기 전에 반드시 아래 mv를 먼저 실행한다.
+> (완료 mv 누락이 가장 흔한 사고다 — 이 단계를 건너뛰면 run은 끝난 것이 아니다.)
+
 ```bash
-# 본문 끝에 추가:  ## 완료 기록\n✅ 완료: {요약} ({YYYY-MM-DD HH:MM})
+# 1) 본문 끝에 완료 기록 append(Edit):  ## 완료 기록\n✅ 완료: {요약} ({YYYY-MM-DD HH:MM})
+# 2) done/ 으로 이동 (완료 정의 행위)
 mv "{SESSION_ROOT}/docs/tasks/doing/$CLAIMED" "{SESSION_ROOT}/docs/tasks/done/$CLAIMED"
 ```
-`claimed_at`/`claimed_by` 는 그대로 두어도 무방(완료 이력).
+`claimed_at`/`claimed_by`/`committed:` 는 그대로 두어 완료 이력으로 보존한다.
+
+#### Step 7-V — 완료 검증 (필수 · 선점-검증과 대칭)
+
+mv 직후, **`doing/` 에 본 작업 파일이 남아있지 않은지** 반드시 확인한다:
+```bash
+if [ -e "{SESSION_ROOT}/docs/tasks/doing/$CLAIMED" ]; then
+  # 아직 남아있음 → mv 재시도. 그래도 실패하면 사유와 함께 BLOCKED 보고
+  mv "{SESSION_ROOT}/docs/tasks/doing/$CLAIMED" "{SESSION_ROOT}/docs/tasks/done/$CLAIMED"
+fi
+# done/ 에 존재 확인되어야 비로소 "완료"
+ls "{SESSION_ROOT}/docs/tasks/done/$CLAIMED" >/dev/null 2>&1 && echo "✅ done 확인" || echo "🚨 완료 이동 실패"
+```
+`done/` 에 존재가 확인되어야만 Step 8(보고)로 진행한다.
 
 ---
 
@@ -372,6 +415,10 @@ cnt=$(ls "{SESSION_ROOT}"/docs/tasks/done/*.md 2>/dev/null | wc -l)
 - ❌ mv claim 실패를 오류로 보고 종료 (다음 후보로 진행해야 함)
 - ❌ 워크트리에서만 빌드 통과 확인 후 완료 처리
 - ❌ 작업 실패 시 done/ 으로 이동 (실패는 blocked/)
+- ❌ **`doing/` 에 작업을 남긴 채 run 종료** — 반드시 done/(커밋 성공) 또는 blocked/(3회 실패)로 이동. 잔류 = 사고
+- ❌ **`done/` 이동(Step 7) 전에 "완료" 보고** — mv가 완료의 정의. 검증(Step 7-V)까지 통과해야 보고
+- ❌ 커밋 성공 후 `committed:` 마커 기록 생략 (Step 6-C) — 마커 없으면 완료-고아 화해 불가
+- ❌ **`committed:` 마커가 있는 doing/ 고아를 재실행** — Step 0-B에서 곧장 done/ 으로 화해할 것 (중복 커밋 방지)
 - ❌ 한 번에 두 개 이상 작업 동시 착수
 - ❌ Tier 3 작업을 advisor 없이 착수 (`advisor: done` 이면 생략 정상)
 - ❌ `.claude/user.lock` 존재 시 무시하고 진행

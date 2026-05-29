@@ -78,7 +78,7 @@ Skills/                           ← 본 repo 루트
 5. **상태=디렉터리(유일 권위)** — frontmatter에 `status` 필드 금지(drift 방지)
 6. **staging→원자적 mv 생성** — 빈 파일 선생성 금지. 병합은 Edit-only, 실패 시 신규파일 fallback (split-brain 방지)
 7. **predecessors 선행조건** — claim 전 선행 id가 모두 `done/`에 있어야 착수
-8. **좀비/고아 자동 복구** — doing/ 30분 timeout → todo/ 복귀, `.staging/` 고아 청소
+8. **좀비/고아 자동 복구 + 완료 화해** — doing/ 의 `committed:` 마커 있으면 곧장 done/ 으로 화해(재실행 금지), 없고 30분 경과면 todo/ 복귀, `.staging/` 고아 청소
 9. **워크트리 절대 금지** — 과거 사고 재발 방지 (Red Lines)
 10. **Tier 분류 (1/2/3)** — advisor(Opus) 호출 여부 결정. `advisor: done` 시 run에서 재호출 생략
 11. **아카이브 일원화** — 완료 정리는 **task-run에서만**(`[x]` 생산 주체가 run). add에서 제거
@@ -86,6 +86,7 @@ Skills/                           ← 본 repo 루트
 13. **컨텍스트 절감** — 본문 통째 읽기 금지, frontmatter만 `awk '/^---$/{c++;next}c==1'` 추출
 14. **사용자 잠금** — `.claude/user.lock` 파일로 백그라운드 루프 정지
 15. **빌드 락 파일** — `.claude/build.lock` 으로 동시 빌드 직렬화
+16. **완료 무결성** — `mv doing→done` 이 곧 "완료"의 정의(보고 전 Step 7-V 검증 필수). 커밋 성공 직후 `committed:` 해시 마커 기록 → mv 누락돼도 다음 run이 재실행 없이 done/ 으로 화해. doing/ 잔류는 어떤 분기에서도 금지(성공=done, 실패=blocked)
 
 ---
 
@@ -139,7 +140,7 @@ Skills/                           ← 본 repo 루트
 ### 1. 스킬 수정 시
 
 - **모든 스킬은 markdown 지시문**이다. 코드가 아니다.
-- 새로운 안전 규칙을 추가할 때는 **이미 정의된 task-manager 15개 핵심 설계 원칙과 충돌하지 않는지** 확인.
+- 새로운 안전 규칙을 추가할 때는 **이미 정의된 task-manager 16개 핵심 설계 원칙과 충돌하지 않는지** 확인.
 - task-add/kai-task-run/kai-task-clear 간 **일관성 유지** (예: 영향 파일 포맷, 타임스탬프 형식, 락 파일 경로).
 - 작업 단계 번호(Step N)를 변경할 때는 cross-reference (다른 Step에서 언급하는 곳) 모두 갱신.
 
