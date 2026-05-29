@@ -29,83 +29,98 @@ bash /Volumes/KAIFACUN/Projects/Skills/meeting-to-spec/install.sh
 
 ### task-manager
 
-체크리스트 기반 작업 관리. 어느 프로젝트에서도 `/kai-task-add`, `/kai-task-run`, `/kai-task-clear` 명령으로
+**파일-per-task** 작업 관리. 어느 프로젝트에서도 `/kai-task-add`, `/kai-task-run`, `/kai-task-clear`, `/kai-task-list` 명령으로
 **다중 에이전트 안전한** 작업 큐를 운영한다.
+
+> 🧱 **작업 1개 = 파일 1개** (`docs/tasks/` 디렉터리). 상태는 디렉터리(`todo/`·`doing/`·`done/`·`blocked/`)가
+> 권위이고, 전이는 `mv`(원자적 rename)로만 일어난다. 단일 `check-list.md` 공유 쓰기에서 발생하던
+> **번호 선점 충돌·동시 쓰기 꼬임이 구조적으로 사라진다.**
 
 | 스킬 | 명령 | 역할 |
 |---|---|---|
-| kai-task-add | `/kai-task-add {설명}` | `docs/check-list.md`에 항목 추가 (영향 파일 의무 기록) |
-| kai-task-run | `/kai-task-run` | 미시작 항목 선점 → 완수 → 완료 처리 |
-| kai-task-clear | `/kai-task-clear` | 완료 항목 → `docs/check-list-done.md`로 이동 |
+| kai-task-add | `/kai-task-add {설명}` | `docs/tasks/todo/`에 task 파일 1개 추가 (영향 파일 의무, staging→원자적 mv) |
+| kai-task-run | `/kai-task-run` | todo/ 의 가장 먼저 만든 작업을 `mv` 원자 선점 → 완수 → `done/` 이동 |
+| kai-task-clear | `/kai-task-clear` | `done/` 완료 작업을 `done/archive/`로 정리 |
+| kai-task-list | `/kai-task-list` | 미완료(todo·doing·blocked) frontmatter만 스캔하여 FIFO 요약 (읽기 전용) |
 
 설치:
 ```bash
-bash /Volumes/KAIFACUN/Projects/Skills/task-manager/install.sh
+bash {이 repo}/task-manager/install.sh
 ```
 
 설치 스크립트는 다음을 수행:
-- `~/.claude/skills/{task-add,task-run,task-clear}/SKILL.md` 심볼릭 링크 생성
+- `~/.claude/skills/kai-task-{add,run,clear,list}/SKILL.md` 심볼릭 링크 생성
 - `~/.claude/agents/advisor.md` 심볼릭 링크 생성 (Opus 자문 에이전트)
 
 심볼릭 링크 방식이므로 이 repo를 수정하면 모든 프로젝트에 즉시 반영된다.
+기존 `check-list.md` 가 있는 프로젝트는 add/run 첫 실행 시 자동으로 `tasks/` 로 1회 마이그레이션된다.
 
 ---
 
 ## 다중 에이전트 안전성 설계
 
-### 1. 선점 마커 + 타임스탬프
+### 1. 디렉터리 = 상태, `mv` = 원자적 전이
 
-| 마커 | 의미 |
+| 디렉터리 | 의미 |
 |---|---|
-| `- [ ]` | 미시작 — 착수 가능 |
-| `- [~]` | 작업중 — `(선점: YYYY-MM-DD HH:MM)` 포함 |
-| `- [x]` | 완료 |
-| `- [!]` | 자체 판단으로 진행했으나 사후 확인 권장 |
+| `todo/` | 미시작 — 착수 가능 |
+| `doing/` | 작업중 — 선점됨 (frontmatter `claimed_at`) |
+| `done/` | 완료 |
+| `blocked/` | 자체 판단으로 막힘 — 사후 확인 권장 |
 
-Edit 툴의 unique-string matching이 자연스러운 락 역할.
-선점 실패 시(다른 에이전트가 동시 선점) 다음 후보로 자동 재시도.
+선점은 `mv todo/X doing/X`. **rename(2)은 원자적**이라 두 에이전트가 같은 작업을 동시에 집어도
+한쪽만 성공하고 다른 쪽은 자연히 다음 후보로 넘어간다. (구 `[~]`마커 + Edit재시도 기계장치를 대체)
+작업 생성은 `.staging/` 에 완성본을 쓴 뒤 원자적 `mv`로 todo/ 투입 → 부분 작성 파일이 보이는 윈도우 제거.
 
 ### 2. 영향 파일 충돌 검사
 
-각 작업 항목은 **영향 파일** 필드를 의무적으로 갖는다.
-task-run은 모든 활성 `[~]` 항목의 영향 파일을 합집합으로 모은 뒤,
-후보 `[ ]` 항목과 교집합이 있으면 skip한다.
+각 task 파일은 frontmatter `impact_files` 를 의무적으로 갖는다.
+task-run은 작업중(`doing/`) 파일들의 impact_files 합집합과 후보의 교집합이 있으면 양보한다(id 작은 쪽 우선).
 
-```markdown
-- [ ] **#5** — Header 리팩터링.
-  - **영향 파일**: src/header.ts, src/header.scss
-  - 세부 설명...
+```yaml
+---
+id: 20260529-143000-a3f
+title: Header 리팩터링
+impact_files:
+  - src/header.ts
+  - src/header.scss
+predecessors: []
+---
 ```
 
-→ 5개 백그라운드 에이전트가 동시 운영되어도 같은 파일을 두 에이전트가 동시 편집하지 않음.
+→ 여러 백그라운드 에이전트가 동시 운영되어도 같은 파일을 두 에이전트가 동시 편집하지 않음.
 
-### 3. 좀비 선점 자동 복구
+### 3. FIFO 실행 + 선행조건
 
-`- [~]` 의 선점 타임스탬프가 30분 이상 경과하면 좀비로 간주, `- [ ]` 로 복귀.
-에이전트 충돌·중단으로 인한 영구 락을 방지.
+ID가 `YYYYMMDD-HHMMSS-...` 라 **파일명 정렬 = 생성순 = 실행순**. 가장 먼저 만든 작업이 먼저 실행된다.
+frontmatter `predecessors` 에 선행 작업 id를 적으면, 그 작업들이 모두 `done/` 에 들어오기 전까지 후행은 착수되지 않는다.
 
-### 4. Build Lock
+### 4. 좀비 선점 자동 복구
 
-`.claude/build.lock` 파일로 동시 빌드 직렬화.
-다른 에이전트가 빌드 중이면 최대 5분 대기 후 진행.
+`doing/` 파일이 30분 이상 갱신되지 않으면 좀비로 간주, `todo/` 로 되돌린다.
+에이전트 충돌·중단으로 인한 영구 락을 방지. `.staging/` 의 고아 temp도 함께 청소.
 
-### 5. 사용자 작업 잠금
+### 5. Build Lock
 
-`{PROJECT_ROOT}/.claude/user.lock` 파일 존재 시 task-run 즉시 종료.
+`.claude/build.lock` 파일로 동시 빌드 직렬화. 다른 에이전트가 빌드 중이면 최대 5분 대기 후 진행.
+
+### 6. 사용자 작업 잠금
+
+`{SESSION_ROOT}/.claude/user.lock` 파일 존재 시 task-run 즉시 종료.
 ```bash
 touch .claude/user.lock    # 사용자 작업 시작
 rm .claude/user.lock        # 작업 끝나면 해제
 ```
 
-### 6. Git 충돌 완화
+### 7. Git 충돌 완화
 
-task-run의 git 단계는 `pull --rebase` 후 push, 실패 시 최대 3회 재시도.
+task-run의 git 단계는 `pull --rebase` 후 커밋, 실패 시 최대 3회 재시도. 커밋 메시지는 `feat(ops {id접미}): 제목`.
 
-### 7. 컨텍스트 누적 자동 방지
+### 8. 컨텍스트 절감
 
-`- [x]` 항목이 10개 이상이면 task-add/kai-task-run 실행 시 자동으로 오래된 것부터 `check-list-done.md` 로 이동.
-**최근 5개**는 Tier 2 자문 참조용으로 보존.
-사용자가 `/kai-task-clear` 를 까먹어도 매 호출마다 누적되어 컨텍스트가 폭증하는 사고를 방지.
+완료 작업은 `done/` 에 격리되어 더는 읽히지 않는다. add/run/list 모두 **본문을 통째로 읽지 않고**
+frontmatter만 `awk '/^---$/{c++;next} c==1'` 로 추출한다. 작업 1건 처리에 전체 목록을 로드하던 낭비가 사라진다.
+완료 정리(아카이브)는 **task-run에서만** 수행한다.
 
 ---
 
@@ -125,17 +140,18 @@ task-run의 git 단계는 `pull --rebase` 후 push, 실패 시 최대 3회 재�
 | 🔴 3 | 새 기능, 구조 변경, DB, 보안 | **advisor(Opus) 계획 → Sonnet 구현** |
 
 `advisor.md` 가 `~/.claude/agents/` 에 자동 설치되어 Tier 3 작업의 Opus 자문 제공.
-advisor 응답에서 새로 발견된 영향 파일은 체크리스트에 즉시 append.
+advisor 응답에서 새로 발견된 영향 파일은 task 파일의 `impact_files` 에 즉시 append.
 
 ---
 
-## 프로젝트 루트 자동 탐지
+## 세션 루트 자동 탐지 (SESSION_ROOT)
 
-각 스킬은 실행 시점에 git 루트를 탐지:
-```bash
-git rev-parse --show-toplevel 2>/dev/null || pwd
-```
-탐지된 루트 기준으로 `docs/check-list.md` 와 `docs/check-list-done.md` 를 관리.
+각 스킬은 git 루트가 아니라 **세션 루트**를 탐지한다 (하위 프로젝트에 tasks/ 가 생기는 것을 방지):
+1. Claude Code 시스템 컨텍스트의 `Primary working directory` 값 우선
+2. 없으면 현재 위치에서 상위로 올라가며 **가장 상위의 CLAUDE.md** 디렉터리
+
+4개 스킬의 Step 0 탐지 블록은 **글자 그대로 동일**하다 (미묘한 차이가 곧 "파일이 두 곳에 생기는" 버그).
+탐지된 루트 기준으로 `docs/tasks/` 디렉터리를 관리한다.
 
 ---
 

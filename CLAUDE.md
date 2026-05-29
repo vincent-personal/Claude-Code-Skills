@@ -24,12 +24,14 @@ Skills/                           ← 본 repo 루트
   CLAUDE.md                       ← 이 파일
   README.md                       ← 사용자용 안내
   .claude/                        ← Claude Code 세션 설정 (이 디렉터리)
-  task-manager/                   ← 스킬 그룹 1: 작업 관리
+  task-manager/                   ← 스킬 그룹 1: 작업 관리 (파일-per-task)
     install.sh                    ← 심볼릭 링크 설치 스크립트
     advisor.md                    ← Opus 자문 에이전트 정의
+    REFACTOR-file-per-task.md     ← 파일-per-task 아키텍처 설계 자문안 (검증 완료)
     kai-task-add/SKILL.md             ← /kai-task-add 스킬
     kai-task-run/SKILL.md             ← /kai-task-run 스킬
     kai-task-clear/SKILL.md           ← /kai-task-clear 스킬
+    kai-task-list/SKILL.md            ← /kai-task-list 스킬
   meeting-to-spec/                ← 스킬 그룹 2: 미팅 노트 → 시스템 사양
     install.sh                    ← 심볼릭 링크 설치 스크립트
     spec-advisor.md               ← Opus 메타 자문 에이전트 정의 (모든 role agent escalation 대상)
@@ -54,26 +56,37 @@ Skills/                           ← 본 repo 루트
 
 ### task-manager
 
-체크리스트 기반 작업 관리 + 다중 에이전트 안전 큐.
+**파일-per-task** 작업 관리 + 다중 에이전트 안전 큐 (`docs/tasks/` 디렉터리 모델).
+
+> 🧱 단일 `check-list.md` 공유 read/modify/write를 폐기하고 **작업 1개 = 파일 1개**로 전환.
+> 상태는 디렉터리(`todo/`·`doing/`·`done/`·`blocked/`)가 권위이며 전이는 `mv`(원자적 rename)로만.
+> → 번호 선점 충돌·동시 쓰기 꼬임이 **구조적으로 불가능**. 설계 상세: `task-manager/REFACTOR-file-per-task.md`.
 
 | 스킬 | 명령 | 역할 |
 |---|---|---|
-| kai-task-add | `/kai-task-add {설명}` | 영향 파일 의무 기록과 함께 `docs/check-list.md`에 항목 추가 |
-| kai-task-run | `/kai-task-run` | 미시작 항목 선점 → Tier별 advisor 호출 → 코드 작성 → 빌드 → 완료 처리 |
-| kai-task-clear | `/kai-task-clear` | 완료 항목을 `docs/check-list-done.md`로 이동 |
-| kai-task-list | `/kai-task-list` | 미완료 항목(미시작·진행중·확인필요)을 상태별로 요약 출력 (읽기 전용) |
+| kai-task-add | `/kai-task-add {설명}` | 영향 파일(impact_files) 의무 기록과 함께 `docs/tasks/todo/`에 task 파일 1개 추가 (staging→원자적 mv) |
+| kai-task-run | `/kai-task-run` | todo/ 의 가장 먼저 만든 작업을 `mv` 원자 선점 → Tier별 advisor → 코드 → 빌드 → `done/` 이동 |
+| kai-task-clear | `/kai-task-clear` | `done/` 완료 작업을 `done/archive/`로 정리 (읽기/이동 전용) |
+| kai-task-list | `/kai-task-list` | 미완료(todo·doing·blocked)를 frontmatter만 스캔하여 FIFO 요약 출력 (읽기 전용) |
 
 **핵심 설계 원칙 (수정 시 반드시 유지):**
 
-1. **프로젝트 루트 자동 탐지** — `git rev-parse --show-toplevel || pwd`
-2. **선점 마커 `[~]` + 타임스탬프** — 다중 에이전트 중복 착수 방지
-3. **영향 파일 의무 필드** — 같은 파일 동시 편집 방지
-4. **좀비 선점 자동 복구** — 30분 timeout
-5. **워크트리 절대 금지** — 과거 사고 재발 방지 (Red Lines)
-6. **Tier 분류 (1/2/3)** — advisor(Opus) 호출 여부 결정
-7. **자동 아카이브** — `[x]` 10개 이상 시 오래된 항목부터 done 파일로 이동
-8. **사용자 잠금** — `.claude/user.lock` 파일로 백그라운드 루프 정지
-9. **빌드/clear 락 파일** — 동시 실행 직렬화
+1. **SESSION_ROOT 통일 탐지** — Primary working dir 우선, fallback 최상위 CLAUDE.md. **4스킬 Step 0 블록 글자 그대로 동일** (git root 사용 금지)
+2. **`mv` 원자 claim** — `todo→doing` 성공한 한 세션만 획득. 구 `[~]`마커+Edit재시도 기계장치 대체
+3. **시각기반 고유 ID** — `YYYYMMDD-HHMMSS-{NS}-$$-rand` (NS=나노초, **BSD date `%N` 미지원 시 감지→`000000000` fallback**, pid로 유일성 보장). 파일명 정렬 = 생성순 = **FIFO 실행**. 순차 `#N` 폐기(조율 제거)
+4. **영향 파일 의무 필드** — frontmatter `impact_files`. doing/ 합집합과 교집합 검사로 동시 편집 방지
+5. **상태=디렉터리(유일 권위)** — frontmatter에 `status` 필드 금지(drift 방지)
+6. **staging→원자적 mv 생성** — 빈 파일 선생성 금지. 병합은 Edit-only, 실패 시 신규파일 fallback (split-brain 방지)
+7. **predecessors 선행조건** — claim 전 선행 id가 모두 `done/`에 있어야 착수
+8. **좀비/고아 자동 복구 + 완료 화해** — doing/ 의 `committed:` 마커 있으면 곧장 done/ 으로 화해(재실행 금지), 없고 30분 경과면 todo/ 복귀, `.staging/` 고아 청소
+9. **워크트리 절대 금지** — 과거 사고 재발 방지 (Red Lines)
+10. **Tier 분류 (1/2/3)** — advisor(Opus) 호출 여부 결정. `advisor: done` 시 run에서 재호출 생략
+11. **아카이브 일원화** — 완료 정리는 **task-run에서만**(`[x]` 생산 주체가 run). add에서 제거
+12. **레거시 자동 마이그레이션** — add/run Step 0에서 기존 `check-list.md` → `tasks/` 1회 변환
+13. **컨텍스트 절감** — 본문 통째 읽기 금지, frontmatter만 `awk '/^---$/{c++;next}c==1'` 추출
+14. **사용자 잠금** — `.claude/user.lock` 파일로 백그라운드 루프 정지
+15. **빌드 락 파일** — `.claude/build.lock` 으로 동시 빌드 직렬화
+16. **완료 무결성** — `mv doing→done` 이 곧 "완료"의 정의(보고 전 Step 7-V 검증 필수). 커밋 성공 직후 `committed:` 해시 마커 기록 → mv 누락돼도 다음 run이 재실행 없이 done/ 으로 화해. doing/ 잔류는 어떤 분기에서도 금지(성공=done, 실패=blocked)
 
 ---
 
@@ -127,7 +140,7 @@ Skills/                           ← 본 repo 루트
 ### 1. 스킬 수정 시
 
 - **모든 스킬은 markdown 지시문**이다. 코드가 아니다.
-- 새로운 안전 규칙을 추가할 때는 **이미 정의된 9개 핵심 설계 원칙과 충돌하지 않는지** 확인.
+- 새로운 안전 규칙을 추가할 때는 **이미 정의된 task-manager 16개 핵심 설계 원칙과 충돌하지 않는지** 확인.
 - task-add/kai-task-run/kai-task-clear 간 **일관성 유지** (예: 영향 파일 포맷, 타임스탬프 형식, 락 파일 경로).
 - 작업 단계 번호(Step N)를 변경할 때는 cross-reference (다른 Step에서 언급하는 곳) 모두 갱신.
 
