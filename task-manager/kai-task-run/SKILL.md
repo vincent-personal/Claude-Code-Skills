@@ -1,9 +1,9 @@
 ---
 name: kai-task-run
 description: |
-  현재 프로젝트의 docs/check-list.md에서 미시작 항목 하나를 선점하고 완수하는 전역 스킬.
+  현재 세션의 docs/tasks/todo/ 에서 가장 먼저 만든 작업 하나를 원자적으로 선점(mv)하여 완수하는 전역 스킬.
   트리거: /kai-task-run
-  다중 에이전트 환경에서 [~] 선점 마커 + 영향 파일 충돌 검사로 안전성 확보.
+  다중 에이전트 환경에서 mv 원자 claim + 영향 파일 충돌 검사로 안전성 확보.
 allowed-tools:
   - Read
   - Edit
@@ -14,33 +14,33 @@ allowed-tools:
   - Agent
 ---
 
-# kai-task-run — 작업 실행 스킬
+# kai-task-run — 작업 실행 스킬 (파일-per-task)
 
 ## 🤖 자율 실행 원칙 (최상위 규칙 — 모든 Step보다 우선)
 
 **이 스킬은 사용자 확인을 일절 요청하지 않는다. 모든 결정을 스스로 내리고 즉시 실행한다.**
 
-- ❌ "확인이 필요합니다" 출력 금지
-- ❌ "어떻게 할까요?" 출력 금지
-- ❌ "진행해도 될까요?" 출력 금지
+- ❌ "확인이 필요합니다" / "어떻게 할까요?" / "진행해도 될까요?" 출력 금지
 - ✅ 모호한 상황 → 가장 합리적인 해석으로 즉시 진행, 판단 근거만 기록
 - ✅ 여러 선택지 → 프로젝트 컨벤션에 맞는 것 자동 선택, 사유 기록
-- ✅ 파일 수정, 빌드 실행, git 커밋·푸시 → 모두 확인 없이 즉시 실행
-- ✅ 막히면 자체 판단으로 해결 시도, 완전히 불가능한 경우에만 `[!]` 마킹 후 종료
-- ✅ **한 항목 수정 완료 → 즉시 커밋** — 여러 항목을 묶어서 커밋하지 않는다. 항목 하나가 끝날 때마다 반드시 커밋한다.
+- ✅ 파일 수정·빌드·git 커밋 → 확인 없이 즉시 실행
+- ✅ 막히면 자체 해결 시도, 완전히 불가능할 때만 `blocked/` 로 이동 후 종료
+- ✅ **한 작업 완료 → 즉시 커밋** (여러 작업 묶음 커밋 금지)
 
 ---
 
 ## 역할
 
-현재 프로젝트의 `docs/check-list.md`에서 미시작(`- [ ]`) 항목을 하나 선점하여
-작업을 완수하고 완료(`- [x]`) 처리한다.
+`docs/tasks/todo/` 에서 **가장 먼저 만든**(FIFO) 작업 하나를 `doing/` 으로 **원자적으로 선점**하여
+완수하고 `done/` 으로 이동한다.
 
-다중 에이전트 환경 안전장치:
-1. `[~]` 선점 마커 + 타임스탬프
-2. 영향 파일 충돌 검사
-3. 좀비 선점 자동 복구 (30분 timeout)
+다중 에이전트 안전장치:
+1. **`mv` 원자 claim** — todo→doing 성공한 한 세션만 획득 (선점 충돌 불가)
+2. 영향 파일(impact_files) 충돌 검사
+3. 좀비 선점 자동 복구 (doing/ claimed_at 30분 timeout)
 4. 빌드 lock으로 동시 빌드 직렬화
+
+> 🧱 상태 = 디렉터리. `todo/`·`doing/`·`done/`·`blocked/`. 전이는 `mv` 로만.
 
 ---
 
@@ -48,380 +48,275 @@ allowed-tools:
 
 > **이 규칙을 어기면 수십 개의 수정 사항이 분실될 수 있다. 실제로 발생한 사고다.**
 
-### 금지 사항
-
 - ❌ `git worktree add` 로 워크트리 생성 금지
-- ❌ `cp`, `rsync` 등으로 워크트리 ↔ 원본 파일 동기화 금지
+- ❌ `cp`·`rsync` 등으로 워크트리 ↔ 원본 파일 동기화 금지
 - ❌ 워크트리 내부에서만 빌드 통과 확인 후 "완료" 처리 금지
 
-### 반드시 할 것
-
-모든 코드 수정은 **git 루트(Step 0에서 탐지한 경로) 아래의 원본 파일**에서만 수행한다.
-
-```bash
-git rev-parse --show-toplevel
-# 이 경로가 작업 대상 경로와 일치하는지 반드시 확인
-```
+모든 코드 수정은 **git 루트 아래의 원본 파일**에서만 수행한다.
 
 ---
 
 ## ⚡ 실행 절차
 
-### Step 0 — 프로젝트 루트 탐지
+### Step 0 — 세션 루트 탐지 (4스킬 공통 · 글자 그대로 동일)
 
+> ⛔ **절대 금지**: `git rev-parse --show-toplevel` 또는 `pwd` 로 SESSION_ROOT를 결정하지 않는다.
+
+**SESSION_ROOT 결정 방법 (우선순위 순):**
+
+1. **Claude Code 시스템 컨텍스트의 `Primary working directory` 값**을 그대로 사용한다.
+2. 못 찾으면 — 현재 디렉토리에서 상위로 올라가며 **가장 상위의 CLAUDE.md가 있는 디렉토리**:
+   ```bash
+   path=$(pwd); last="$path"
+   while [ "$path" != "/" ]; do
+     [ -f "$path/CLAUDE.md" ] && last="$path"
+     path=$(dirname "$path")
+   done
+   echo "$last"
+   ```
+
+작업 디렉터리: `{SESSION_ROOT}/docs/tasks/`. 없으면 생성:
 ```bash
-git rev-parse --show-toplevel 2>/dev/null || pwd
+mkdir -p "{SESSION_ROOT}/docs/tasks"/{todo,doing,done,blocked,.staging}
 ```
+todo/ 와 doing/ 둘 다 비어있으면 "실행할 작업이 없습니다. `/kai-task-add` 로 먼저 등록하세요." 보고 후 종료.
 
-이 경로를 `PROJECT_ROOT`로 고정한다.
-체크리스트 경로: `{PROJECT_ROOT}/docs/check-list.md`
+> **검증**: 경로에 하위 프로젝트 폴더명이 포함되면 잘못된 경로 — 상위로 올라간다.
 
-파일이 없으면 "체크리스트가 없습니다. `/kai-task-add`로 먼저 작업을 등록하세요." 보고 후 종료.
+> **코드 작업 대상의 git 루트(PROJECT_ROOT)** 는 별도다 — 빌드·커밋은 수정 파일이 속한 git 루트에서 수행한다.
+
+---
+
+### Step 0-M — 레거시 자동 마이그레이션 (1회 · add/run 공통)
+
+**가드**: `docs/check-list.md` 가 **존재**하고 `docs/check-list.md.migrated` 가 **부재**하면 변환(todo/ 비어있음으로 판단 금지):
+1. 각 항목(`- [ ]/[~]/[x]/[!]`)을 등장 순서대로 파싱
+2. `[ ]`·`[~]`→`todo/`(선점 해제), `[x]`→`done/`, `[!]`→`blocked/`
+3. id 접두를 `00000000-000000-{4자리순번}` 로 부여(FIFO에서 신규보다 먼저), kai-task-add Step 4 포맷으로 변환
+4. `check-list.md` → `check-list.md.migrated` rename, "🔄 레거시 N건 마이그레이션 완료" 보고
 
 ---
 
 ### Step 0-A — 사용자 작업 잠금 확인
 
 ```bash
-if [ -f "{PROJECT_ROOT}/.claude/user.lock" ]; then
-  echo "BLOCKED: 사용자 작업 중 — 종료"
-  exit 0
+if [ -f "{SESSION_ROOT}/.claude/user.lock" ]; then
+  echo "BLOCKED: 사용자 작업 중 — 종료"; exit 0
 fi
 ```
-
-파일이 존재하면 즉시 종료. 보고: "사용자 작업 중 — 다음 루프에서 재시도".
+존재하면 즉시 종료. 보고: "사용자 작업 중 — 다음 루프에서 재시도".
 
 ---
 
-### Step 0-B — 좀비 `[~]` 복구
-
-`- [~]` 항목 중 선점 타임스탬프가 **현재 시각 - 30분 이전**이면 좀비.
-좀비를 발견하면 `- [~]` → `- [ ]` 로 되돌리고 (타임스탬프 제거) 일반 후보로 포함.
+### Step 0-B — 좀비 선점 복구 + staging 고아 청소
 
 ```bash
-date +"%Y-%m-%d %H:%M"     # 현재 시각
-# 비교: "2026-05-19 14:30" 형식의 두 문자열 비교
+NOW=$(date +%s)
+# 1) doing/ 좀비: claimed_at(또는 mtime) 30분 경과 → todo/ 로 되돌림
+for f in "{SESSION_ROOT}"/docs/tasks/doing/*.md; do
+  [ -e "$f" ] || continue
+  MT=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")
+  if [ $((NOW - MT)) -gt 1800 ]; then
+    mv "$f" "{SESSION_ROOT}/docs/tasks/todo/$(basename "$f")"   # 좀비 복구
+  fi
+done
+# 2) .staging/ 고아: 30분 경과한 미투입 temp 삭제
+find "{SESSION_ROOT}/docs/tasks/.staging" -type f -mmin +30 -delete 2>/dev/null
+```
+복구된 파일은 frontmatter의 `claimed_at`/`claimed_by` 를 비운다.
+
+---
+
+### Step 1 — 후보 선정 (FIFO · frontmatter만 읽기)
+
+> 💡 **컨텍스트 절감**: 본문을 통째로 읽지 않는다. frontmatter만 추출:
+> `awk '/^---$/{c++; next} c==1' <file>`
+
+```bash
+# 선행조건 만족 집합 = done/ 에 존재하는 id 목록
+done_ids=$(ls "{SESSION_ROOT}"/docs/tasks/done/ 2>/dev/null | sed 's/--.*//')
+# 작업중(doing/) impact_files 합집합 = locked_files
+#   각 doing/*.md 의 frontmatter에서 impact_files 추출하여 합친다
 ```
 
-좀비 복구 후 변경 사항을 즉시 파일에 반영하고 다음 단계로 진행.
-
----
-
-### Step 1 — 체크리스트 전체 읽기
-
-파일 전체를 Read한다.
-
-항목 상태 수집:
-- **활성 `[~]` 목록**: 좀비 아닌 모든 `- [~]` 항목과 그 **영향 파일**
-- **`[ ]` 후보 목록**: 모든 `- [ ]` 항목과 그 **영향 파일**
-- **완료 `[x]` 목록**: 개수 파악 (다음 단계 자동 아카이브용)
-
-`[ ]` 후보가 없으면 → "실행할 항목이 없습니다." 보고 후 종료.
-
----
-
-### Step 1-Z — 완료 항목 자동 아카이브 (컨텍스트 누적 방지)
-
-`- [x]` 항목 개수가 **10개 이상**이면, 가장 오래된 것부터 자동 아카이브하여 **최근 5개만 남긴다**.
-
-#### 절차
-
-1. 파일 내 `- [x]` 항목들을 등장 순서대로 나열 (오래된 것이 위)
-2. 개수 ≥ 10 이면 → 위에서부터 `(개수 - 5)` 개를 추출
-3. 추출한 항목들(세부 항목 포함)을 `{PROJECT_ROOT}/docs/check-list-done.md` 에 append
-   - 파일 없으면 헤더 생성 후 추가
-   - 형식: `## {YYYY-MM-DD} 자동 아카이브` 섹션 아래
-4. `check-list.md` 에서 추출한 항목 제거
-5. 콘솔에 "🗄️ 완료 항목 N개 자동 아카이브" 보고
-
-**절대 건드리지 않을 것:**
-- `- [ ]`, `- [~]`, `- [!]` 항목
-- 파일 상단 규칙/원칙 섹션
-- 최근 5개의 `- [x]` (Tier 2 자문 참조용으로 보존)
-
-아카이브 후 변경된 파일 상태를 다시 Read하여 이후 단계 진행.
-
----
-
-### Step 2 — 영향 파일 충돌 검사
-
-활성 `[~]` 항목들의 영향 파일을 모두 합쳐 `locked_files` 집합 구성.
-
+`todo/` 를 **파일명 정렬순(= 생성순 = FIFO)** 으로 순회한다:
+```bash
+for f in $(ls "{SESSION_ROOT}"/docs/tasks/todo/ 2>/dev/null | sort); do ... done
 ```
-locked_files = ⋃ (각 [~] 항목의 영향 파일)
+todo/ 가 비어있으면 → "실행할 작업이 없습니다." 보고 후 종료.
+
+---
+
+### Step 2 — 후보 검사 → 원자적 선점 (mv claim)
+
+각 후보 `f` 에 대해 순서대로:
+
+1. **선행조건 검사** — frontmatter `predecessors` 의 모든 id가 `done_ids` 에 있어야 한다. 하나라도 없으면 **skip(다음 후보)**.
+   인라인 `[]`·멀티라인 배열 모두 처리하는 추출:
+   ```bash
+   preds=$(awk '
+     /^---$/{c++; next}
+     c==1 && /^predecessors:[[:space:]]*\[/ {next}              # 인라인 [] → 선행조건 없음
+     c==1 && /^predecessors:[[:space:]]*$/ {inp=1; next}        # 멀티라인 시작
+     c==1 && inp && /^[[:space:]]*-[[:space:]]/ {gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next}
+     c==1 && inp && /^[^[:space:]-]/ {inp=0}
+   ' "{SESSION_ROOT}/docs/tasks/todo/$f")
+   # preds 의 각 id가 done_ids 에 모두 포함되는지 확인 — 하나라도 빠지면 continue
+   ```
+2. **영향 파일 기재 검사** — `impact_files` 가 비어있으면 skip하고 `blocked/` 로 이동 + 사유 "영향 파일 미기재" 기록(task-add 보강 필요).
+3. **원자적 선점** — `mv` 시도. 성공하면 내가 획득, 실패(다른 세션이 가져감)하면 다음 후보:
+   ```bash
+   if mv "{SESSION_ROOT}/docs/tasks/todo/$f" "{SESSION_ROOT}/docs/tasks/doing/$f" 2>/dev/null; then
+     CLAIMED="$f"
+   else
+     continue   # 경쟁에서 짐 → 다음 후보
+   fi
+   ```
+4. **선점 후 충돌 재검사** — 방금 claim한 파일의 `impact_files` ∩ (다른 doing/ 파일들의 impact_files) ≠ ∅ 이면 충돌:
+   - **tie-break: id가 더 작은(먼저 만든) 쪽이 우선권**. 내 id가 더 크면 양보 → `mv doing→todo` 롤백 후 다음 후보.
+   - 내 id가 더 작으면 유지하고 진행.
+
+모든 후보가 선행조건 미충족/충돌/경쟁패배면 → "현재 착수 가능한 작업이 없습니다." 보고 후 종료.
+
+선점 성공 시 frontmatter에 기록(Edit):
+```yaml
+claimed_at: {YYYY-MM-DD HH:MM}
+claimed_by: {세션 식별자 (예: date+pid)}
 ```
 
-`[ ]` 후보들을 순서대로 검사:
+---
 
-1. 후보의 영향 파일 ∩ locked_files = ∅ → **선점 가능**
-2. 교집합 존재 → skip, 다음 후보로
-3. 영향 파일 미기재 후보 → skip하고 task-add를 통한 보강 필요 (해당 항목에 `[!] 영향 파일 미기재` 코멘트 추가)
+### Step 3 — 작업 분류 (Tier 판단)
 
-모든 후보가 충돌하면 → "현재 모든 후보가 다른 에이전트의 영향 파일과 충돌함." 보고 후 종료.
+선점한 작업의 frontmatter `tier` 를 신뢰하되, 본문을 보고 재판단. **애매하면 한 단계 위로.**
+
+- 🟢 **Tier 1** (advisor 생략): typo·포맷·주석·import·1~5줄 미세 수정·리네이밍·`[skip-advisor]` → Step 4로
+- 🟡 **Tier 2** (생략 가능): 같은 파일 추가 수정·7일 내 유사 자문 존재·동일 패턴 반복 → 관련 파일/패턴 Read 후 Step 4로
+- 🔴 **Tier 3** (advisor 필수): 새 기능/모듈·구조 변경·외부 통합·DB 스키마·인증/결제/보안 → Step 3-A 후 Step 4로
 
 ---
 
-### Step 3 — 즉시 선점 (타임스탬프 포함)
+### Step 3-A — advisor 호출 (Tier 3 전용)
 
-선택한 항목을 다음 형식으로 변경:
+**⚡ 생략 조건**: frontmatter `advisor: done` 이면 task-add 시점에 이미 자문 완료 → 호출 생략, 본문 `## 구현 방안 (advisor)` 를 그대로 사용하고 Step 4로.
 
-```
-- [~] **#N** — 제목. (선점: 2026-05-19 14:30)
-```
-
-타임스탬프는 `date +"%Y-%m-%d %H:%M"` 결과 사용.
-
-#### 선점 실패 시 복구 절차
-
-Edit이 실패하면 (다른 에이전트가 동시에 같은 항목 선점):
-
-1. 파일을 다시 Read
-2. Step 2부터 재시작 (충돌 검사 → 다음 후보)
-3. 모든 후보 소진 시 종료
-
-#### 선점 후 검증
-
-선점 Edit 성공 후 즉시 파일을 다시 Read하여 해당 줄이 정확히 `- [~]` + 본인 타임스탬프인지 확인.
-검증 실패 시 위 복구 절차 실행.
-
----
-
-### Step 4 — 작업 분류 (Tier 판단)
-
-착수 전 작업 유형을 스스로 분류. **판단이 애매하면 한 단계 위 Tier로.**
-
-#### 🟢 Tier 1 — advisor 생략 (Sonnet 단독 처리)
-- typo, 포맷팅, 주석, import 정리
-- 1~5줄 미세 수정 (로직 변경 없음)
-- 변수명/메서드명 리네이밍
-- `[skip-advisor]` 태그가 있는 항목
-
-→ Step 4-B로.
-
-#### 🟡 Tier 2 — 기존 패턴 참조 (advisor 생략 가능)
-- 같은 파일에 대한 추가 수정
-- 7일 이내 동일/유사 작업에 대한 advisor 자문이 존재
-- 기존 컴포넌트와 동일 패턴 반복
-
-→ 관련 파일과 기존 구현 패턴을 Read한 후 Step 4-B로.
-
-#### 🔴 Tier 3 — advisor 호출 필수 (Opus 계획 → Sonnet 구현)
-- 새 기능/모듈 구현
-- 기존 코드의 구조적 변경
-- 외부 라이브러리/서비스 통합
-- DB 스키마 변경
-- 인증/결제/보안 관련 코드
-
-→ Step 4-A 후 Step 4-B로.
-
----
-
-### Step 4-A — advisor 호출 (Tier 3 전용)
-
-**⚡ advisor 재호출 생략 조건**: 항목 제목에 `[advisor:done]` 태그가 있으면 task-add 시점에 이미 advisor 자문이 완료된 것이다. → advisor 호출을 **생략**하고 체크리스트에 기술된 구현 방안을 그대로 사용하여 Step 4-B로 진행.
-
-태그가 없는 경우에만 아래 절차를 실행한다:
-
+`advisor: done` 이 아닌 경우에만:
 ```
 Agent({
   subagent_type: "advisor",
   prompt: `
-    작업 항목: {체크리스트 항목 전문 (영향 파일 포함)}
+    작업: {task 파일 본문 + impact_files}
     프로젝트 루트: {PROJECT_ROOT}
-    관련 파일: {파악한 관련 파일 경로들}
+    관련 파일: {파악한 경로들}
     제약 조건: {CLAUDE.md 컨벤션 중 관련 항목}
   `
 })
 ```
+응답의 "영향 범위"에서 **새 파일** 발견 시:
+1. task 파일 `impact_files` 에 즉시 append (Edit)
+2. 충돌 재검사 — 새 파일이 다른 doing/ 의 impact_files와 겹치면 즉시 중단, `mv doing→todo` 롤백, 다음 루프 재시도
 
-advisor 응답의 "영향 범위"에서 **새로 발견된 파일**이 있으면:
-1. 체크리스트 항목의 **영향 파일** 목록에 즉시 append (Edit으로 파일 갱신)
-2. 충돌 재검사 — 새 파일이 다른 `[~]`의 영향 파일과 겹치면 즉시 작업 중단, `[~]` → `[ ]` 복귀, 다음 루프에 재시도
-
-**advisor 에이전트가 없는 경우**: `~/.claude/agents/advisor.md` 가 설치되지 않음.
-→ `task-manager/install.sh` 재실행 또는 Plan 에이전트 fallback (`subagent_type: "Plan"`).
+> advisor 에이전트 없음 → `task-manager/install.sh` 재실행 또는 `subagent_type: "Plan"` fallback.
 
 ---
 
-### Step 4-B — 화면 작업 여부 확인
+### Step 3-B — 화면 작업 여부 확인
 
-항목의 영향 파일 또는 작업 설명에서 아래 조건을 확인한다:
+frontmatter `screen_work: true` 이거나 impact_files 확장자(`.html`·`.scss`·`.css`·`.component.ts`)·설명에 UI 키워드("화면/UI/컴포넌트/뷰/스타일/레이아웃/페이지/모달/드로어/폼/버튼/카드/테이블") 포함 시 — **Step 5 전에 반드시:**
 
-**화면 작업 감지 조건:**
-- 영향 파일 확장자에 `.html`, `.scss`, `.css`, `.component.ts` 포함
-- 작업 설명에 "화면", "UI", "컴포넌트", "뷰", "스타일", "레이아웃", "페이지", "모달", "드로어", "폼", "버튼", "카드", "테이블" 등 UI 키워드 포함
-- 항목 세부 내용에 `[화면 작업 필수]` 태그 존재
-
-**화면 작업인 경우 — Step 5 전에 반드시 아래 순서를 따른다:**
-
-1. **브라우저 확인 (구현 전)**: Playwright MCP(`mcp__plugin_ecc_playwright__`) 또는 `/browse` 스킬로 현재 화면 상태를 스크린샷으로 확인한다.
-2. **레퍼런스 조회**: `ecc:docs-lookup` 또는 Context7 MCP로 사용 중인 UI 프레임워크·라이브러리의 최신 API를 확인한다.
-3. **구현 후 브라우저 검증**: 코드 작성(Step 5) 완료 후 Playwright MCP로 실제 화면을 다시 확인하고, 의도한 UI가 렌더링되는지 검증한다.
-4. **디자인 검토**: `design-review` 또는 `ecc:frontend-design` 스킬로 디자인 일관성을 검토한다.
+1. **브라우저 확인(구현 전)**: Playwright MCP(`mcp__plugin_ecc_playwright__`) 또는 `/browse` 로 현재 화면 스크린샷
+2. **레퍼런스 조회**: `ecc:docs-lookup` 또는 Context7 MCP로 UI 프레임워크 최신 API 확인
+3. **구현 후 브라우저 검증**: 코드 작성(Step 5) 후 Playwright MCP로 실제 화면 재확인
+4. **디자인 검토**: `design-review` 또는 `ecc:frontend-design` 로 일관성 검토
 
 ---
 
-### Step 4-C — 프로젝트 컨벤션 파일 확인 (필수 — 코드 작성 전)
+### Step 3-C — 프로젝트 컨벤션 파일 확인 (필수 — 코드 작성 전)
 
 **코드를 한 줄이라도 작성하기 전에 반드시 컨벤션 파일을 읽는다.**
-컨벤션 파일이 정한 네이밍·폴더 구조·store 패턴을 따르지 않으면 리뷰 거부 사유가 된다.
+impact_files 경로에서 앱을 탐지(예 `verida-ops/...` → verida-ops)한 뒤:
+1. `{SESSION_ROOT}/CLAUDE.md` (`★ 공통 프론트엔드 컨벤션` 필독)
+2. `{SESSION_ROOT}/{앱}/CLAUDE.md`
+3. `{SESSION_ROOT}/{앱}/docs/FRONTEND-CONVENTIONS.md` (있으면 반드시)
 
-작업 항목의 **영향 파일 경로**에서 앱을 탐지한다 (예: `verida-ops/...` → verida-ops).
-
-읽는 순서:
-1. `{SESSION_ROOT}/CLAUDE.md` — 워크스페이스 공통 컨벤션 (`★ 공통 프론트엔드 컨벤션` 섹션 필독)
-2. `{SESSION_ROOT}/{앱}/CLAUDE.md` — 앱 레벨 컨벤션
-3. `{SESSION_ROOT}/{앱}/docs/FRONTEND-CONVENTIONS.md` — 상세 프론트엔드 규칙 **(파일이 있으면 반드시 읽음)**
-
-```bash
-# 앱 디렉토리 예시 (영향 파일 경로 기반 탐지)
-APP_DIR="{SESSION_ROOT}/verida-ops"   # 또는 verida-order, verida-pulse 등
-
-CONV="${APP_DIR}/docs/FRONTEND-CONVENTIONS.md"
-[ -f "$CONV" ] && echo "컨벤션 파일 존재 — 읽기 필수"
-```
-
-**코드 작성 전 반드시 확인할 항목 (컨벤션 파일에서):**
-- 컴포넌트 네이밍: `view-{domain}`, `drawer-{action}`, `dialog-{purpose}` 접두사
-- 4-파일 세트: `.ts` + `.html` + `.scss`(항상) + `.store.ts`(UI 상태 있을 때)
-- 클래스명: `View{X}Component`, `Drawer{Y}Component`
-- Store 패턴: `signalStore()` + `withDevtools()`
-- Store 배치: UI 상태 → 컴포넌트 폴더, 도메인 데이터 → `core/stores/`
-- 금지 사항 (Red Lines): hex 하드코딩, `@Injectable + plain signal`, `.scss` 생략 등
-
-파일이 존재하지 않으면 이 단계를 건너뛴다.
+**확인 항목:** 컴포넌트 네이밍(`view-{domain}`/`drawer-{action}`/`dialog-{purpose}`), 4-파일 세트(`.ts`+`.html`+`.scss`+`.store.ts`), 클래스명(`View{X}Component`), Store 패턴(`signalStore()`+`withDevtools()`), Store 배치, Red Lines(hex 하드코딩·`@Injectable+plain signal`·`.scss` 생략 금지). 없으면 건너뛴다.
 
 ---
 
-### Step 5 — 코드 작성 (Sonnet 구현)
+### Step 4 — 코드 작성 (Sonnet 구현)
 
-advisor 자문(Tier 3) 또는 자체 분석(Tier 1/2)을 바탕으로 코드 작성.
-**Step 4-C에서 읽은 컨벤션 파일의 규칙을 그대로 적용한다.**
+advisor 자문(Tier 3) 또는 자체 분석(Tier 1/2)을 바탕으로 코드 작성. **Step 3-C 컨벤션을 그대로 적용.**
 
-**파일 수정 전 반드시 확인:**
-
+**파일 수정 전 반드시:**
 ```bash
-# 1. 워크트리 검증 — 수정 대상 파일이 PROJECT_ROOT 아래에 있는지
-realpath {수정할 파일 경로} 2>/dev/null || (cd "$(dirname {파일})" && pwd -P)
-# 결과가 PROJECT_ROOT 하위 경로 아니면 즉시 중단
-
-# 2. 영향 파일 등록 확인 — 새로 수정하는 파일이 체크리스트 항목의 "영향 파일"에 있는지
-# 없으면: 항목의 영향 파일에 먼저 append (다른 에이전트가 보호받도록)
+# 1) 워크트리 검증 — 수정 대상이 PROJECT_ROOT 아래인지
+realpath {수정할 파일} 2>/dev/null || (cd "$(dirname {파일})" && pwd -P)
+#    결과가 PROJECT_ROOT 하위가 아니면 즉시 중단
+# 2) 영향 파일 등록 — 새로 수정하는 파일이 task 파일 impact_files에 없으면 먼저 append(Edit)
 ```
-
-작업 중 막히는 경우:
-- 80% 이상 진행 가능하면 자체 판단으로 계속 진행
-- 완전히 불가능한 경우에만 `- [~]` → `- [!]` 로 변경 후 사유 기록
+막히면: 80% 이상 가능하면 자체 판단으로 계속. 완전히 불가능할 때만 `mv doing→blocked` + 본문에 사유 기록 후 종료.
 
 ---
 
-### Step 6 — 빌드/검증 (build lock 사용)
+### Step 5 — 빌드/검증 (build lock)
 
 ```bash
 BUILD_LOCK="{PROJECT_ROOT}/.claude/build.lock"
-
-# 다른 에이전트가 빌드 중이면 최대 5분 대기
 WAITED=0
-while [ -f "$BUILD_LOCK" ] && [ $WAITED -lt 300 ]; do
-  sleep 5
-  WAITED=$((WAITED + 5))
-done
-
-# 락 획득 후 빌드 실행
+while [ -f "$BUILD_LOCK" ] && [ $WAITED -lt 300 ]; do sleep 5; WAITED=$((WAITED+5)); done
 touch "$BUILD_LOCK"
 cd {PROJECT_ROOT} && npm run build 2>&1
 BUILD_RESULT=$?
-
-# 락 해제 (trap 미사용 — Claude Code 확인 팝업 방지)
-rm -f "$BUILD_LOCK"
-
+rm -f "$BUILD_LOCK"        # trap 미사용 — Claude Code 확인 팝업 방지
 exit $BUILD_RESULT
 ```
-
-빌드 실패 시 자체 수정 시도 (최대 3회). 3회 실패 시 `- [~]` → `- [!]` 마킹.
-
-**빌드는 반드시 `PROJECT_ROOT`에서 실행한다.**
+빌드 실패 시 자체 수정 최대 3회. 3회 실패 시 `mv doing→blocked` + 사유 기록. **빌드는 반드시 PROJECT_ROOT에서.**
 
 ---
 
-### Step 7 — Git 커밋 (필수 — 항목 하나 완료 = 커밋 하나)
+### Step 6 — Git 커밋 (필수 — 작업 하나 완료 = 커밋 하나)
 
-> ⚠️ **이 단계는 선택이 아니다.** 빌드가 통과한 모든 작업은 반드시 커밋한다.
-> **한 항목 수정이 끝나면 즉시 커밋한다. 여러 항목 완료 후 한꺼번에 커밋하지 않는다.**
-> push는 사용자가 명시적으로 요청할 때만 실행한다 (기본: 커밋만).
+> ⚠️ **선택이 아니다.** 빌드 통과한 작업은 반드시 커밋. **작업 하나가 끝나면 즉시 커밋**(묶음 금지). push는 사용자 명시 요청 시에만.
 
-**절차:**
+#### 6-A — appVersion 증가 (앱 CLAUDE.md 규칙)
 
-#### 7-A — appVersion 증가 (앱 CLAUDE.md 규칙 적용)
+`src/environments/environment.ts`(+`.prod.ts`)가 있으면 bump. 없으면 생략.
 
-커밋 직전, 프로젝트에 `src/environments/environment.ts` + `environment.prod.ts` 버전 파일이 존재하면 아래 절차로 버전을 올린다. **파일이 없으면 이 단계를 생략한다.**
+**① bump 레벨 (우선순위):**
+1. task 본문에 명시("MINOR/MAJOR/PATCH bump") → 그대로
+2. 명시 없으면 앱 CLAUDE.md `## ★ 버전 관리 규칙` 참조 후 자체 판단
+   - **MINOR**: 신규 페이지·기능·주요 UI 추가 / **MAJOR**: 아키텍처 변경·대규모 리팩토링 / **PATCH**: 버그픽스·CSS·문구·소규모
+   - 경계 애매 → **PATCH**(보수적)
 
-**① bump 레벨 결정 (우선순위 순):**
+**② 계산:** `PATCH: Z+1 (Z≥99→Y+1.0)` / `MINOR: Y+1.0 (Y≥99→X+1.0.0)` / `MAJOR: X+1.0.0`
 
-1. **체크리스트 항목 본문에 명시된 경우 → 그것을 따른다**
-   - "MINOR 증가" 또는 "MINOR bump" 포함 → **MINOR**
-   - "MAJOR 증가" 또는 "MAJOR bump" 포함 → **MAJOR**
-   - "PATCH 증가" 또는 아무 명시 없음 → **PATCH**
-
-2. **명시 없으면 → 프로젝트 하위 앱 CLAUDE.md의 버전 규칙 참조 후 자체 판단**
-   - 파일 위치: `{PROJECT_ROOT}/verida-ops/CLAUDE.md` (또는 해당 하위 앱 CLAUDE.md) 내 `## ★ 버전 관리 규칙` 섹션
-   - verida-ops 기준:
-
-     | bump | 증가 조건 | 판단 기준 |
-     |---|---|---|
-     | **MINOR** | 신규 페이지·신규 기능·주요 UI 추가 | 새 `.ts`+`.html` 페이지 파일 생성, 신규 store/드로어/다이얼로그 컴포넌트 추가 |
-     | **MAJOR** | 전체 아키텍처 변경·대규모 리팩토링·정식 릴리스 | 폴더 구조 변경, 스택 교체, 전체 리팩토링 |
-     | **PATCH** | 버그픽스·CSS 수정·문구 변경·소규모 개선 | 기존 파일 수정, 스타일 조정, 오타 수정 |
-
-   - 판단이 MINOR/PATCH 경계에서 애매하면 → **PATCH** 선택 (보수적)
-
-**② 버전 계산 규칙:**
-
-```
-PATCH: X.Y.Z → X.Y.(Z+1)      Z ≥ 99이면 → X.(Y+1).0
-MINOR: X.Y.Z → X.(Y+1).0      Y ≥ 99이면 → (X+1).0.0
-MAJOR: X.Y.Z → (X+1).0.0
-```
-
-**③ bash 적용 (BUMP_LEVEL = "PATCH" | "MINOR" | "MAJOR"):**
-
+**③ 적용 (BUMP_LEVEL):**
 ```bash
 VERSION_FILE="{PROJECT_ROOT}/src/environments/environment.ts"
 PROD_FILE="{PROJECT_ROOT}/src/environments/environment.prod.ts"
-
-[ -f "$VERSION_FILE" ] || { echo "버전 파일 없음 — skip"; }
-
+[ -f "$VERSION_FILE" ] || echo "버전 파일 없음 — skip"
 CURRENT=$(grep "appVersion" "$VERSION_FILE" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
 IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
-
 case "$BUMP_LEVEL" in
-  MAJOR)
-    MAJ=$((MAJ + 1)); MIN=0; PAT=0 ;;
-  MINOR)
-    MIN=$((MIN + 1)); PAT=0
-    [ "$MIN" -ge 99 ] && { MAJ=$((MAJ + 1)); MIN=0; } ;;
-  *)  # PATCH 기본
-    PAT=$((PAT + 1))
-    [ "$PAT" -ge 99 ] && { MIN=$((MIN + 1)); PAT=0; }
-    [ "$MIN" -ge 99 ] && { MAJ=$((MAJ + 1)); MIN=0; } ;;
+  MAJOR) MAJ=$((MAJ+1)); MIN=0; PAT=0 ;;
+  MINOR) MIN=$((MIN+1)); PAT=0; [ "$MIN" -ge 99 ] && { MAJ=$((MAJ+1)); MIN=0; } ;;
+  *)     PAT=$((PAT+1)); [ "$PAT" -ge 99 ] && { MIN=$((MIN+1)); PAT=0; }; [ "$MIN" -ge 99 ] && { MAJ=$((MAJ+1)); MIN=0; } ;;
 esac
 NEW_VERSION="$MAJ.$MIN.$PAT"
-
 sed -i '' "s/appVersion: '${CURRENT}'/appVersion: '${NEW_VERSION}'/" "$VERSION_FILE"
 [ -f "$PROD_FILE" ] && sed -i '' "s/appVersion: '${CURRENT}'/appVersion: '${NEW_VERSION}'/" "$PROD_FILE"
-
 git add "$VERSION_FILE" "$PROD_FILE" 2>/dev/null
 echo "버전 ${CURRENT} → ${NEW_VERSION} (${BUMP_LEVEL})"
 ```
 
-#### 7-B — 커밋
+#### 6-B — 커밋
 
 ```bash
 cd {PROJECT_ROOT}
-git pull --rebase                              # 다른 에이전트의 push 동기화
-git add {Step 5에서 수정·생성한 파일들만}       # 영향 파일 목록 기준, git add -A 금지
+git pull --rebase
+git add {Step 4에서 수정·생성한 파일들만}      # 영향 파일 기준, git add -A 금지
 git commit -m "$(cat <<'EOF'
-feat(ops #N): {제목 한 줄 요약}
+feat(ops {id접미}): {제목 한 줄 요약}
 
 {변경 내용 2~4줄 bullet 요약}
 
@@ -429,57 +324,59 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 EOF
 )"
 ```
-
-**커밋 규칙:**
-- 메시지 형식: `feat(ops #N): 제목` (N = 작업 번호)
-- `git add -A` / `git add .` 금지 — 영향 파일만 stage (버전 파일 포함)
-- `git pull --rebase` 실패 시 최대 3회 재시도
-- push는 사용자 명시 요청 시에만 실행
-
-**커밋 실패 시:**
-- rebase 충돌 → 충돌 파일 확인 후 자체 해결, 최대 3회
-- 3회 모두 실패 시 커밋 없이 `[!]` 마킹 후 사유 기록
-- 커밋 성공 여부와 무관하게 Step 8(완료 처리)은 반드시 실행
+- 메시지 형식: `feat(ops {id 짧은 접미, 예 a3f}): 제목` — 순차 #N 대신 task id 접미로 traceability 유지
+- `git add -A`/`git add .` 금지 — 영향 파일만 stage(버전 파일 포함)
+- `git pull --rebase` 실패 시 최대 3회 재시도. 3회 실패 시 커밋 없이 `mv doing→blocked` + 사유. **커밋 성공 여부와 무관하게 Step 7은 반드시 실행**
 
 ---
 
-### Step 8 — 완료 처리
+### Step 7 — 완료 처리 (mv doing→done)
 
-성공 시 `- [~]` → `- [x]` 로 변경하고 완료 내용 기록. **선점 타임스탬프 제거.**
+성공 시 task 파일 본문에 완료 기록을 append(Edit)한 뒤 done/ 으로 이동:
+```bash
+# 본문 끝에 추가:  ## 완료 기록\n✅ 완료: {요약} ({YYYY-MM-DD HH:MM})
+mv "{SESSION_ROOT}/docs/tasks/doing/$CLAIMED" "{SESSION_ROOT}/docs/tasks/done/$CLAIMED"
+```
+`claimed_at`/`claimed_by` 는 그대로 두어도 무방(완료 이력).
 
-```markdown
-- [x] **#N** — {제목}.
-  - **영향 파일**: {기존 목록}
-  - {기존 세부 항목들}
-  - ✅ 완료: {완료 내용 한 줄 요약} ({YYYY-MM-DD HH:MM})
+---
+
+### Step 7-Z — 완료 디렉터리 정리 (아카이브 일원화 · run에서만)
+
+> 자동 아카이브는 **task-run에서만** 수행한다(task-add에서 제거됨 — `[x]`를 생산하는 주체가 run이므로).
+> 단, 본문을 읽지 않으므로 컨텍스트 부담은 사실상 없다 — 정리는 선택적 위생 작업이다.
+
+`done/` 파일 수가 **30개 초과**면 가장 오래된(파일명 정렬 앞) 것부터 `done/archive/` 로 이동하여 **최근 30개만** done/ 직하에 남긴다.
+```bash
+mkdir -p "{SESSION_ROOT}/docs/tasks/done/archive"
+cnt=$(ls "{SESSION_ROOT}"/docs/tasks/done/*.md 2>/dev/null | wc -l)
+# cnt>30 이면 오래된 (cnt-30)개를 done/archive/ 로 mv
 ```
 
 ---
 
-### Step 9 — 완료 보고
+### Step 8 — 완료 보고
 
-완수한 항목 번호, 제목, 수정된 파일 목록을 사용자에게 보고.
+완수한 작업 id·제목·수정 파일 목록을 사용자에게 보고한다.
 
 ---
 
 ## Red Lines (절대 금지)
 
-- ❌ `git worktree add` 사용
-- ❌ `cp` / `rsync` 로 워크트리 ↔ 원본 파일 동기화
-- ❌ `PROJECT_ROOT` 외부 경로의 파일 수정
-- ❌ `- [~]` 상태인 항목 착수
-- ❌ 선점(`- [~]`) + 타임스탬프 없이 작업 시작
-- ❌ **영향 파일 충돌 검사 생략** — 다중 에이전트 환경에서 치명적
-- ❌ 영향 파일 미기재 항목 임의 처리 (보강 후 재시도)
-- ❌ 선점 Edit 한 번 실패로 전체 종료 (반드시 재시도)
+- ❌ `git worktree add` / `cp`·`rsync` 워크트리 동기화
+- ❌ `PROJECT_ROOT` 외부 경로 파일 수정
+- ❌ `doing/` 에 이미 있는(=다른 세션 작업 중) 파일 착수
+- ❌ **mv claim 없이 작업 시작** — 반드시 todo→doing 원자 선점 성공 후 착수
+- ❌ **영향 파일(impact_files) 충돌 검사 생략** — 다중 에이전트 환경에서 치명적
+- ❌ 영향 파일 미기재 작업 임의 처리 (blocked/ 이동 후 보강)
+- ❌ mv claim 실패를 오류로 보고 종료 (다음 후보로 진행해야 함)
 - ❌ 워크트리에서만 빌드 통과 확인 후 완료 처리
-- ❌ 작업 실패 시 `- [x]` 표시
-- ❌ 한 번에 두 개 이상의 항목 동시 착수
-- ❌ Tier 3 작업을 advisor 없이 착수
+- ❌ 작업 실패 시 done/ 으로 이동 (실패는 blocked/)
+- ❌ 한 번에 두 개 이상 작업 동시 착수
+- ❌ Tier 3 작업을 advisor 없이 착수 (`advisor: done` 이면 생략 정상)
 - ❌ `.claude/user.lock` 존재 시 무시하고 진행
-- ❌ 빌드 lock 무시하고 동시 빌드 강행
-- ❌ Step 5에서 수정하지 않은 파일까지 `git add`
-- ❌ 빌드 통과 후 커밋 생략 — Step 7은 매 작업마다 필수
-- ❌ `git add -A` 또는 `git add .` 사용 — 영향 파일만 stage
-- ❌ 여러 항목을 묶어서 커밋 — 반드시 항목 하나당 커밋 하나 (1 item = 1 commit)
-- ❌ 버전 파일이 존재하는데 PATCH 증가 생략 — 커밋마다 반드시 appVersion PATCH를 올린다
+- ❌ 빌드 lock 무시하고 동시 빌드
+- ❌ Step 4에서 수정하지 않은 파일까지 `git add` / `git add -A`·`git add .`
+- ❌ 빌드 통과 후 커밋 생략 — Step 6은 매 작업 필수
+- ❌ 여러 작업 묶음 커밋 — 작업 하나당 커밋 하나
+- ❌ 버전 파일이 있는데 PATCH 증가 생략

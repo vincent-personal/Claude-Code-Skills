@@ -1,131 +1,81 @@
 ---
 name: kai-task-clear
 description: |
-  현재 프로젝트의 docs/check-list.md에서 완료된 항목을 docs/check-list-done.md로 이동하는 전역 스킬.
+  현재 세션의 docs/tasks/done/ 의 완료 작업 파일을 done/archive/ 로 옮겨 정리하는 전역 스킬.
   트리거: /kai-task-clear
 allowed-tools:
   - Read
-  - Edit
-  - Write
   - Bash
 ---
 
-# kai-task-clear — 완료 항목 아카이브 스킬
+# kai-task-clear — 완료 작업 정리 스킬 (파일-per-task)
 
 ## 역할
 
-`docs/check-list.md`의 완료(`- [x]`) 항목을 `docs/check-list-done.md`로 이동하여
-체크리스트를 정리한다.
+`docs/tasks/done/` 직하의 완료 작업 파일을 `docs/tasks/done/archive/` 로 이동하여 정리한다.
 
-> ⚠️ **이 스킬은 단일 에이전트로만 실행할 것.** 다중 동시 실행 시 done 파일에 중복 발생 가능.
-> task-run 루프와는 별개로, 사용자가 수동으로 호출하는 것을 전제로 한다.
+> 🧱 파일-per-task 모델에서는 완료 작업이 이미 `done/` 에 격리되어 있어 **컨텍스트를 더는 점유하지 않는다.**
+> 따라서 이 스킬은 "정리(보관)" 위생 작업이며, 사용자가 수동 호출하는 것을 전제로 한다.
+> per-file `mv` 이동이라 다중 실행 시에도 항목 중복/꼬임 위험이 구조적으로 없다.
 
 ---
 
 ## ⚡ 실행 절차
 
-### Step 0 — 프로젝트 루트 탐지
+### Step 0 — 세션 루트 탐지 (4스킬 공통 · 글자 그대로 동일)
+
+> ⛔ **절대 금지**: `git rev-parse --show-toplevel` 또는 `pwd` 로 SESSION_ROOT를 결정하지 않는다.
+
+**SESSION_ROOT 결정 방법 (우선순위 순):**
+
+1. **Claude Code 시스템 컨텍스트의 `Primary working directory` 값**을 그대로 사용한다.
+2. 못 찾으면 — 현재 디렉토리에서 상위로 올라가며 **가장 상위의 CLAUDE.md가 있는 디렉토리**:
+   ```bash
+   path=$(pwd); last="$path"
+   while [ "$path" != "/" ]; do
+     [ -f "$path/CLAUDE.md" ] && last="$path"
+     path=$(dirname "$path")
+   done
+   echo "$last"
+   ```
+
+작업 디렉터리: `{SESSION_ROOT}/docs/tasks/`
+`done/` 이 없거나 비어있으면 "정리할 완료 작업이 없습니다." 보고 후 종료.
+
+> **검증**: 경로에 하위 프로젝트 폴더명이 포함되면 잘못된 경로 — 상위로.
+
+---
+
+### Step 1 — 완료 작업 이동 (done/ → done/archive/)
 
 ```bash
-git rev-parse --show-toplevel 2>/dev/null || pwd
+mkdir -p "{SESSION_ROOT}/docs/tasks/done/archive"
+moved=0
+for f in "{SESSION_ROOT}"/docs/tasks/done/*.md; do
+  [ -e "$f" ] || continue                                  # 파일 없으면 skip
+  mv "$f" "{SESSION_ROOT}/docs/tasks/done/archive/$(basename "$f")" && moved=$((moved+1))
+done
+echo "이동: $moved 건"
 ```
 
-- 소스: `{PROJECT_ROOT}/docs/check-list.md`
-- 대상: `{PROJECT_ROOT}/docs/check-list-done.md`
+> 옵션: 사용자가 "최근 N개는 남겨줘" 라고 하면, 파일명 정렬 역순 상위 N개를 제외하고 이동한다.
 
-소스 파일이 없으면 "체크리스트가 없습니다." 보고 후 종료.
-
----
-
-### Step 0-A — clear lock 확인
-
-```bash
-CLEAR_LOCK="{PROJECT_ROOT}/.claude/clear.lock"
-if [ -f "$CLEAR_LOCK" ]; then
-  echo "BLOCKED: 다른 task-clear 진행 중"
-  exit 0
-fi
-touch "$CLEAR_LOCK"
-trap "rm -f $CLEAR_LOCK" EXIT
-```
-
-다른 task-clear 인스턴스가 진행 중이면 종료.
+**절대 건드리지 않을 것:**
+- `todo/`, `doing/`, `blocked/` 의 모든 파일
+- `done/archive/` 안의 기존 파일
 
 ---
 
-### Step 1 — 체크리스트 읽기
+### Step 2 — 완료 보고
 
-`check-list.md` 전체를 Read한다.
-
-- `- [x]` 항목이 없으면 → "이동할 완료 항목이 없습니다." 보고 후 종료
-- `- [~]`(작업중) 항목이 있으면 → 경고 표시. `[x]` 항목은 정상 이동.
-
----
-
-### Step 2 — 완료 항목 추출
-
-`- [x]` 로 시작하는 항목과 해당 항목의 **들여쓰기 세부 항목 전체**(영향 파일, 완료 기록 포함)를 추출.
-
-추출 형식 예시:
-```markdown
-- [x] **#3** — 제목.
-  - **영향 파일**: src/foo.ts
-  - 세부 항목 1
-  - ✅ 완료: 완료 내용 (2026-05-19 14:30)
-```
-
----
-
-### Step 3 — check-list-done.md에 추가
-
-`check-list-done.md` 파일이 없으면 아래 헤더로 새로 생성:
-
-```markdown
-# 완료된 작업 목록
-
----
-
-```
-
-파일 맨 아래에 다음 형식으로 append:
-
-```markdown
-## {YYYY-MM-DD} 아카이브 ({HH:MM})
-
-- [x] **#N** — ...
-  - **영향 파일**: ...
-  - ...
-
----
-```
-
-같은 날짜 블록이 이미 있으면 그 안에 추가한다.
-
----
-
-### Step 4 — check-list.md에서 제거
-
-추출한 `- [x]` 항목들과 해당 세부 항목을 `check-list.md`에서 삭제.
-
-**절대 삭제 금지:**
-- `- [ ]` (미시작) 항목
-- `- [~]` (작업중) 항목
-- `- [!]` (확인 필요) 항목
-- 파일 상단의 규칙/원칙/헤더 섹션
-
----
-
-### Step 5 — 완료 보고
-
-이동된 항목 수와 번호 목록을 사용자에게 보고.
-
-예시: "✅ #2, #3, #5 항목 3개를 check-list-done.md로 이동하였습니다."
+이동한 작업 수와 id(또는 제목) 목록을 사용자에게 보고한다.
+예시: "✅ 완료 작업 3건을 done/archive/ 로 정리하였습니다. (a3f, b7d, c1e)"
 
 ---
 
 ## Red Lines (절대 금지)
 
-- ❌ `- [ ]`, `- [~]`, `- [!]` 항목 삭제
-- ❌ 사용자 확인 없이 `[x]`가 아닌 항목 이동
-- ❌ check-list.md의 규칙/헤더 섹션 삭제
-- ❌ clear lock 없이 강제 실행
+- ❌ `todo/`·`doing/`·`blocked/` 의 파일 이동·삭제
+- ❌ 작업 파일 내용 수정 (이동만 수행)
+- ❌ `done/archive/` 의 기존 파일 덮어쓰기·삭제
+- ❌ `git worktree add` / `cp` / `rsync`
