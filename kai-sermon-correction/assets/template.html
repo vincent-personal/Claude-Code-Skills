@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>설교 교정본</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a1a; color: #e8e8e8;
+    font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+    line-height: 2.0; padding: 40px 20px; max-width: 820px; margin: 0 auto;
+  }
+  h1 { color: #8ab4f8; font-size: 22px; margin-bottom: 8px; text-align: center; }
+  .subtitle { color: #6b8fbf; font-size: 14px; text-align: center; margin-bottom: 30px; }
+  /* 범례 */
+  .legend {
+    background: #222; border: 1px solid #333; border-radius: 8px;
+    padding: 16px 20px; margin-bottom: 30px; font-size: 13px; line-height: 1.8;
+  }
+  .legend-title { color: #8ab4f8; font-weight: bold; margin-bottom: 6px; }
+  .legend .keep-ex { color: #e8e8e8; }
+  .legend .del-ex { color: #444; text-decoration: line-through; }
+  .legend .edit-ex { color: #6b3333; text-decoration: line-through; }
+  .legend .add-ex { color: #5b9fff; }
+  .legend .verse-ex { color: #c8d8f0; }
+  .legend .bg-ex { color: #6bbf6b; }
+  /* 본문 클래스 */
+  .keep { color: #e8e8e8; }
+  .del { color: #444; text-decoration: line-through; text-decoration-color: #555; }
+  .edit { color: #6b3333; text-decoration: line-through; text-decoration-color: #804040; }
+  .add { color: #5b9fff; }
+  .verse {
+    border-left: 3px solid #5b9fff; padding: 10px 16px; margin: 14px 0;
+    background: rgba(91,159,255,0.05); color: #c8d8f0;
+  }
+  .verse .ref { color: #6b8fbf; font-size: 13px; display: block; margin-top: 4px; }
+  .bg {
+    color: #6bbf6b; padding: 10px 16px; margin: 14px 0;
+    background: rgba(107,191,107,0.05); border-left: 3px solid #6bbf6b;
+    font-size: 14px; line-height: 1.8;
+  }
+  .bg .bg-title { font-weight: bold; margin-bottom: 4px; }
+  h2 {
+    color: #8ab4f8; font-size: 16px; margin: 40px 0 14px;
+    padding: 6px 12px; background: rgba(138,180,248,0.08);
+    border-left: 3px solid #5b9fff;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 30px 0; }
+  p { margin: 10px 0; }
+  .hebrew { font-size: 18px; direction: rtl; color: #7b8fbf; }
+  .greek { font-size: 16px; color: #7b8fbf; }
+  .discuss {
+    color: #1a1a1a; background: #ffd54f; padding: 14px 18px; margin: 18px 0;
+    border-radius: 12px; font-size: 14px; line-height: 1.9;
+    border: 2px solid #ffca28;
+  }
+  .discuss .discuss-title { font-weight: bold; margin-bottom: 6px; color: #1a1a1a; }
+  .discuss table {
+    width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px;
+  }
+  .discuss th {
+    background: #f9a825; color: #1a1a1a; padding: 8px 12px; text-align: left;
+    border: 1px solid #e6a020; font-weight: bold;
+  }
+  .discuss td {
+    padding: 8px 12px; border: 1px solid #e6c34a; background: #ffe082;
+  }
+  .discuss .highlight-row td { background: #fff3b0; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h1><!-- TITLE --></h1>
+<p class="subtitle"><!-- SUBTITLE: 발표 시간, 날짜 등 --></p>
+
+<div class="legend">
+  <div class="legend-title">📌 범례 (Color Legend)</div>
+  <span class="keep-ex">기본 텍스트</span> — 원문 보존 ✅ 읽음<br>
+  <span class="del-ex">회색+삭제선</span> — 삭제 ❌ 건너뜀<br>
+  <span class="edit-ex">빨간+삭제선</span> — 수정 대상 ❌ 건너뜀<br>
+  <span class="add-ex">파란색</span> — 추가/요약 ✅ 읽음<br>
+  <span class="verse-ex">연한파랑</span> — 성경 구절 ✅ 읽음<br>
+  <span class="bg-ex">녹색</span> — 배경 설명 / 참고 자료 📚<br>
+  <span style="color:#ffd54f">●</span> <span style="color:#ffd54f">노란 박스</span> — 토의 포인트 / 목자 생각 💬
+</div>
+
+<!-- ============ 본문 시작 ============ -->
+
+
+
+<!-- ============ 본문 끝 ============ -->
+
+</body>
+</html>
