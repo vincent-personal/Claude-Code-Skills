@@ -1,9 +1,9 @@
 ---
 name: kai-task-run
 description: |
-  현재 세션의 docs/tasks/todo/ 에서 가장 먼저 만든 작업 하나를 원자적으로 선점(mv)하여 완수하는 전역 스킬.
+  docs/tasks/todo/ 의 작업을 FIFO 순서로 모두 완수할 때까지 자동 반복 실행하는 전역 스킬.
+  작업이 없으면 자동 종료. 다중 에이전트 환경에서 mv 원자 claim + 영향 파일 충돌 검사로 안전성 확보.
   트리거: /kai-task-run
-  다중 에이전트 환경에서 mv 원자 claim + 영향 파일 충돌 검사로 안전성 확보.
 allowed-tools:
   - Read
   - Edit
@@ -454,10 +454,27 @@ cnt=$(ls "{SESSION_ROOT}"/docs/tasks/done/*.md 2>/dev/null | wc -l)
 
 ---
 
-### Step 6 — 완료 보고
+### Step 6 — 완료 보고 + 루프 계속 여부 확인
 
-완수한 작업 id·제목·커밋 해시·수정 파일 목록을 사용자에게 보고한다.
-(Step 4 서브에이전트의 `RESULT: done | commit={HASH} | files={목록}` 을 그대로 활용)
+완수한 작업 id·제목·커밋 해시·수정 파일 목록을 한 줄로 보고한다.
+
+```
+✅ [{id 접미}] {제목} | commit={HASH}
+```
+
+보고 직후 **todo/ 잔여 항목을 확인**하여 루프를 계속할지 결정한다:
+
+```bash
+remaining=$(ls "{SESSION_ROOT}"/docs/tasks/todo/*.md 2>/dev/null | wc -l | tr -d ' ')
+```
+
+| 결과 | 동작 |
+|---|---|
+| `remaining > 0` | user.lock 재확인(Step 0-A) 후 **Step 1로 복귀** (다음 작업 선점) |
+| `remaining = 0` | `"✅ 모든 작업 완료 — todo/ 비어있음."` 보고 후 **종료** |
+
+> 루프 반복 시 메인 세션 컨텍스트 증가는 미미하다 (작업 선점·결과 수신만; 구현·빌드·커밋은 서브에이전트).
+> user.lock 파일을 생성하면 다음 루프에서 일시 정지된다: `touch {SESSION_ROOT}/.claude/user.lock`
 
 ---
 
