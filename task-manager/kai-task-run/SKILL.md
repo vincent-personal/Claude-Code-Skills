@@ -351,6 +351,9 @@ cnt=$(ls "{{SESSION_ROOT}}"/docs/tasks/done/*.md 2>/dev/null | wc -l | tr -d ' '
 
 ### W-7 — 다음 워커 체인 / 자동 종료 (핵심)
 
+> ⛔ **절대 금지**: `Skill(kai-task-run)` 또는 `/kai-task-run` 호출 금지.
+> 백그라운드 에이전트에서 Skill 도구는 차단된다. 반드시 아래 절차대로 `Agent()` 직접 호출.
+
 ```bash
 # user.lock 재확인
 [ -f "{{SESSION_ROOT}}/.claude/user.lock" ] && echo "⏸ user.lock — 일시 정지" && exit 0
@@ -358,15 +361,24 @@ cnt=$(ls "{{SESSION_ROOT}}"/docs/tasks/done/*.md 2>/dev/null | wc -l | tr -d ' '
 remaining=$(ls "{{SESSION_ROOT}}"/docs/tasks/todo/*.md 2>/dev/null | wc -l | tr -d ' ')
 ```
 
-**remaining > 0** → 다음 워커를 백그라운드로 생성 후 즉시 종료:
-```
-Agent({
-  run_in_background: true,
-  prompt: {이 워커 에이전트 지침 전체를 그대로 복사 — {{SESSION_ROOT}}는 이미 실제 값}
-})
-```
-
 **remaining = 0** → `"✅ 모든 작업 완료 — todo/ 비어있음."` 출력 후 종료.
+
+**remaining > 0** → 다음 워커 생성:
+
+1. SKILL.md 파일을 Read로 읽는다:
+   ```bash
+   SKILL_PATH="$HOME/.claude/skills/kai-task-run/SKILL.md"
+   ```
+2. `## 🔧 워커 에이전트 지침` 섹션부터 `## Red Lines` 직전까지를 추출한다.
+3. 추출한 텍스트의 `{{SESSION_ROOT}}`가 이미 실제 경로로 치환되어 있는지 확인 (아니면 치환).
+4. `Agent()` 도구로 직접 호출:
+   ```
+   Agent({
+     run_in_background: true,
+     prompt: {위에서 추출한 워커 지침 텍스트 전체}
+   })
+   ```
+5. 즉시 종료.
 
 ---
 
@@ -387,6 +399,10 @@ Agent({
 - ❌ done/ 이동(W-4V) 전에 "완료" 보고
 - ❌ committed: 마커 기록 생략
 - ❌ committed: 있는 doing/ 고아 재실행 (W-0B에서 done/ 화해)
+
+### 체인
+- ❌ **`Skill(kai-task-run)` 또는 `/kai-task-run` 호출** — 백그라운드에서 차단됨. 반드시 `Agent()` 직접 사용
+- ❌ W-7에서 SKILL.md Read 없이 다음 워커 생성 시도
 
 ### 구현
 - ❌ 코드 작성·빌드·커밋을 워커 에이전트 레벨에서 직접 실행 — W-4 구현 서브에이전트에 위임
