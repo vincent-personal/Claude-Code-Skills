@@ -32,13 +32,11 @@ allowed-tools:
 
 ```
 메인 세션 (얇은 루프 · 컨텍스트 최소)
-  ┌─ Step 0-A: user.lock 확인          ← 루프 시작점
-  │  Step 0-B: 좀비 복구
-  │  Step 1:   todo/ 확인 → 비었으면 종료
+  ┌─ Step 0-A: 잠금확인 + 좀비복구 + todo확인 [단일 Bash]  ← 루프 시작점
   │  Step 2:   작업 선점 (mv claim)
   │  Step 3:   needs_advisor: true 시 advisor 호출 (메인 세션에서 직접)
   │  Step 4:   백그라운드 워커 스폰 (Agent run_in_background: true)
-  │  Step 5:   done/ 또는 blocked/ 폴링
+  │  Step 5:   done/ 또는 blocked/ 폴링 (sleep 5)
   └─ Step 6:   완료 보고 → Step 0-A로 루프
 
 백그라운드 워커 (작업 1개 완수 후 조용히 종료)
@@ -94,41 +92,37 @@ mkdir -p "{SESSION_ROOT}/docs/tasks"/{todo,doing,done,blocked,.staging}
 
 ---
 
-### Step 0-A — 사용자 잠금 확인 ← **루프 시작점**
+### Step 0-A — 루프 준비 (단일 Bash 블록) ← **루프 시작점**
+
+아래 스크립트를 **한 번에** 실행한다 (잠금 확인 + 좀비 복구 + todo 카운트):
 
 ```bash
-[ -f "{SESSION_ROOT}/.claude/user.lock" ] && echo "⏸ user.lock — 일시 정지." && exit 0
-```
+# 사용자 잠금
+[ -f "{SESSION_ROOT}/.claude/user.lock" ] && echo "⏸ user.lock — 종료." && exit 0
 
----
+# 완료-고아 화해 + 좀비 복구 (doing/ 파일 있을 때만 실행)
+if ls "{SESSION_ROOT}"/docs/tasks/doing/*.md 2>/dev/null | grep -q .; then
+  NOW=$(date +%s)
+  for f in "{SESSION_ROOT}"/docs/tasks/doing/*.md; do
+    [ -e "$f" ] || continue
+    if awk '/^---$/{c++; next} c==1 && /^committed:[[:space:]]*[0-9a-f]/{found=1} END{exit !found}' "$f"; then
+      mv "$f" "{SESSION_ROOT}/docs/tasks/done/$(basename "$f")"
+      continue
+    fi
+    MT=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")
+    [ $((NOW - MT)) -gt 1800 ] && mv "$f" "{SESSION_ROOT}/docs/tasks/todo/$(basename "$f")"
+  done
+fi
 
-### Step 0-B — 완료-고아 화해 + 좀비 복구 + 스테이징 청소
-
-```bash
-NOW=$(date +%s)
-for f in "{SESSION_ROOT}"/docs/tasks/doing/*.md; do
-  [ -e "$f" ] || continue
-  # committed: 마커 있으면 done/ 화해 (재실행 금지)
-  if awk '/^---$/{c++; next} c==1 && /^committed:[[:space:]]*[0-9a-f]/{found=1} END{exit !found}' "$f"; then
-    mv "$f" "{SESSION_ROOT}/docs/tasks/done/$(basename "$f")"
-    continue
-  fi
-  # 30분 경과 좀비 → todo/ 복귀
-  MT=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")
-  [ $((NOW - MT)) -gt 1800 ] && mv "$f" "{SESSION_ROOT}/docs/tasks/todo/$(basename "$f")"
-done
+# staging 고아 청소
 find "{SESSION_ROOT}/docs/tasks/.staging" -type f -mmin +30 -delete 2>/dev/null
-```
 
----
-
-### Step 1 — todo/ 확인
-
-```bash
+# todo 카운트
 remaining=$(ls "{SESSION_ROOT}"/docs/tasks/todo/*.md 2>/dev/null | wc -l | tr -d ' ')
+echo "remaining=$remaining"
 ```
 
-`remaining = 0` → `"✅ 모든 작업 완료 — todo/ 비어있음."` 출력 후 **종료**.
+`remaining=0` → `"✅ 모든 작업 완료 — todo/ 비어있음."` 출력 후 **종료**.
 
 ---
 
@@ -213,8 +207,8 @@ MAX=3600; ELAPSED=0
 while true; do
   ls "{SESSION_ROOT}/docs/tasks/done/{CLAIMED}" 2>/dev/null && STATUS="done" && break
   ls "{SESSION_ROOT}/docs/tasks/blocked/{CLAIMED}" 2>/dev/null && STATUS="blocked" && break
-  sleep 15
-  ELAPSED=$((ELAPSED + 15))
+  sleep 5
+  ELAPSED=$((ELAPSED + 5))
   [ $ELAPSED -ge $MAX ] && STATUS="timeout" && break
 done
 ```
@@ -357,7 +351,7 @@ ls "{{SESSION_ROOT}}/docs/tasks/done/{{CLAIMED}}" || mv "{{SESSION_ROOT}}/docs/t
 ### 완료 처리
 - ❌ doing/ 에 작업 남긴 채 워커 종료 — 반드시 done/ 또는 blocked/
 - ❌ committed: 마커 기록 생략
-- ❌ committed: 있는 doing/ 고아 재실행 (Step 0-B에서 done/ 화해)
+- ❌ committed: 있는 doing/ 고아 재실행 (Step 0-A에서 done/ 화해)
 
 ### 체인 (워커 전용 — 가장 중요)
 - ❌ **워커 안에서 `Agent()` 호출** — 서브에이전트에서 절대 불가
