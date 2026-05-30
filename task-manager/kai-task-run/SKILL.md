@@ -188,16 +188,10 @@ preds=$(awk '
 # preds 각 id가 done_ids에 없으면 → continue
 ```
 
-#### 2-2. 영향 파일 기재 검사
+#### 2-2+2-3. ★ 영향 파일 추출 + locked_files 겹침 검사 (mv 시도 전 · 단일 패스)
 
-`impact_files` 가 비어있으면 → `blocked/` 이동 + 사유 "영향 파일 미기재" 기록 후 `continue`.
+> frontmatter를 한 번만 읽어 "기재 여부 확인"과 "locked_files 겹침 검사"를 동시에 처리한다.
 
-#### 2-3. ★ locked_files 사전 겹침 검사 (mv 시도 전)
-
-> 이 검사가 다중 세션 파일 충돌의 **1차 방어선**이다.
-> `mv` 없이 건너뛰므로 불필요한 claim+rollback 사이클이 발생하지 않는다.
-
-후보 파일의 `impact_files`를 추출하여 `locked_files`(현재 doing/ 합집합)와 교집합을 확인한다:
 ```bash
 candidate_files=$(awk '
   /^---$/{c++; next}
@@ -206,6 +200,14 @@ candidate_files=$(awk '
   c==1 && in_block && /^[^[:space:]]/{in_block=0}
 ' "{SESSION_ROOT}/docs/tasks/todo/$f")
 
+# 2-2: 기재 검사 — 비어있으면 blocked/ 이동
+if [ -z "$candidate_files" ]; then
+  mv "{SESSION_ROOT}/docs/tasks/todo/$f" "{SESSION_ROOT}/docs/tasks/blocked/$f"
+  # frontmatter에 사유 Edit: "영향 파일 미기재 — task-add 보강 필요"
+  continue
+fi
+
+# 2-3: locked_files 겹침 검사 (1차 방어선)
 overlap=0
 for cf in $candidate_files; do
   for lf in $locked_files; do
@@ -250,10 +252,11 @@ claimed_by: {세션 식별자 (예: date+pid)}
 
 ### Step 3 — 작업 분류 (Tier 판단)
 
-선점한 작업의 frontmatter `tier` 를 신뢰하되, 본문을 보고 재판단. **애매하면 한 단계 위로.**
+선점한 작업의 frontmatter `tier` 를 읽어 판단한다. **애매하면 한 단계 위 Tier로.**
+> 파일 본문을 통째로 읽지 않는다 — frontmatter의 `tier` 값을 그대로 사용한다.
 
 - 🟢 **Tier 1** (advisor 생략): typo·포맷·주석·import·1~5줄 미세 수정·리네이밍·`[skip-advisor]` → Step 4로
-- 🟡 **Tier 2** (생략 가능): 같은 파일 추가 수정·7일 내 유사 자문 존재·동일 패턴 반복 → 관련 파일/패턴 Read 후 Step 4로
+- 🟡 **Tier 2** (생략 가능): 같은 파일 추가 수정·7일 내 유사 자문·동일 패턴 반복 → Step 4로
 - 🔴 **Tier 3** (advisor 필수): 새 기능/모듈·구조 변경·외부 통합·DB 스키마·인증/결제/보안 → Step 3-A 후 Step 4로
 
 ---
@@ -290,15 +293,7 @@ frontmatter `screen_work: true` 이거나 impact_files 확장자(`.html`·`.scss
 1. **브라우저 확인(구현 전)**: Playwright MCP(`mcp__plugin_ecc_playwright__`) 또는 `/browse` 로 현재 화면 스크린샷
 2. **레퍼런스 조회**: `ecc:docs-lookup` 또는 Context7 MCP로 UI 프레임워크 최신 API 확인
 
-→ 스크린샷·API 참고 내용을 Step 4 서브에이전트 프롬프트의 **"현재 파일 상태 메모"** 항목에 함께 전달한다.
-
-**서브에이전트 프롬프트에 추가할 화면 작업 지침 (Step 4 호출 시 포함):**
-```
-## 화면 작업 추가 지침
-- 구현 후 반드시: npm run build 전에 Playwright MCP로 실제 화면 확인
-- 디자인 토큰(var(--*)) 사용, hex 하드코딩 금지
-- design-review 또는 ecc:frontend-design으로 일관성 검토
-```
+→ 결과를 Step 4 서브에이전트 프롬프트의 **`## 화면 작업 컨텍스트`** 섹션에 기재하여 전달한다.
 
 ---
 
@@ -317,9 +312,8 @@ Step 4 서브에이전트 프롬프트의 `## 컨벤션 파일` 항목에 아래
 - {PROJECT_ROOT}/docs/FRONTEND-CONVENTIONS.md   (있으면)
 ```
 
-서브에이전트가 준수해야 할 핵심 항목 (메인 세션이 요약·첨부):
-- 컴포넌트 네이밍(`view-{domain}` / `drawer-{action}` / `dialog-{purpose}`)
-- 4-파일 세트 규칙, Store 패턴, Red Lines(hex 하드코딩 금지 등)
+서브에이전트가 위 경로들을 직접 Read하여 규칙을 파악·적용한다.
+메인 세션은 경로만 전달하고 내용을 읽지 않는다.
 
 ---
 
@@ -364,7 +358,9 @@ CLAIMED_FILE: {CLAIMED}   ← 현재 {SESSION_ROOT}/docs/tasks/doing/ 에 있음
 - {SESSION_ROOT}/CLAUDE.md
 - {PROJECT_ROOT}/CLAUDE.md              (있으면)
 - {PROJECT_ROOT}/docs/FRONTEND-CONVENTIONS.md   (있으면)
-{Step 3-C에서 탐지한 핵심 컨벤션 요약 첨부}
+
+## 화면 작업 컨텍스트 (screen_work: true인 경우만 기재, 아니면 생략)
+{Step 3-B에서 촬영한 구현 전 스크린샷 요약 및 API 참고사항}
 
 ## 수행 절차 (순서대로 · 생략 불가)
 
