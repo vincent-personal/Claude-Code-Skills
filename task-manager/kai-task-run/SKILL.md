@@ -92,7 +92,7 @@ todo/ 와 doing/ 둘 다 비어있으면 "실행할 작업이 없습니다. `/ka
 **가드**: `docs/check-list.md` 가 **존재**하고 `docs/check-list.md.migrated` 가 **부재**하면 변환(todo/ 비어있음으로 판단 금지):
 1. 각 항목(`- [ ]/[~]/[x]/[!]`)을 등장 순서대로 파싱
 2. `[ ]`·`[~]`→`todo/`(선점 해제), `[x]`→`done/`, `[!]`→`blocked/`
-3. id 접두를 `00000000-000000-{4자리순번}` 로 부여(FIFO에서 신규보다 먼저), kai-task-add Step 4 포맷으로 변환
+3. id 접두를 `00000000-000000-{4자리순번}` 로 부여(FIFO에서 신규보다 먼저), kai-task-add의 task 파일 포맷으로 변환
 4. `check-list.md` → `check-list.md.migrated` rename, "🔄 레거시 N건 마이그레이션 완료" 보고
 
 ---
@@ -150,7 +150,13 @@ done_ids=$(ls "{SESSION_ROOT}"/docs/tasks/done/ 2>/dev/null | sed 's/--.*//')
 locked_files=""
 for df in "{SESSION_ROOT}"/docs/tasks/doing/*.md; do
   [ -e "$df" ] || continue
-  files=$(awk '/^---$/{c++; next} c==1 && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print}' "$df")
+  # impact_files: 블록만 추출 (다른 배열 필드와 혼동 방지)
+  files=$(awk '
+    /^---$/{c++; next}
+    c==1 && /^impact_files:/{in_block=1; next}
+    c==1 && in_block && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next}
+    c==1 && in_block && /^[^[:space:]]/{in_block=0}
+  ' "$df")
   locked_files="$locked_files $files"
 done
 # locked_files: 공백 구분 파일 경로 목록 (중복 무방)
@@ -195,7 +201,9 @@ preds=$(awk '
 ```bash
 candidate_files=$(awk '
   /^---$/{c++; next}
-  c==1 && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print}
+  c==1 && /^impact_files:/{in_block=1; next}
+  c==1 && in_block && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next}
+  c==1 && in_block && /^[^[:space:]]/{in_block=0}
 ' "{SESSION_ROOT}/docs/tasks/todo/$f")
 
 overlap=0
@@ -294,15 +302,24 @@ frontmatter `screen_work: true` 이거나 impact_files 확장자(`.html`·`.scss
 
 ---
 
-### Step 3-C — 프로젝트 컨벤션 파일 확인 (필수 — 코드 작성 전)
+### Step 3-C — 프로젝트 컨벤션 파일 확인 (서브에이전트 전달용)
 
-**코드를 한 줄이라도 작성하기 전에 반드시 컨벤션 파일을 읽는다.**
-impact_files 경로에서 앱을 탐지(예 `verida-ops/...` → verida-ops)한 뒤:
-1. `{SESSION_ROOT}/CLAUDE.md` (`★ 공통 프론트엔드 컨벤션` 필독)
-2. `{SESSION_ROOT}/{앱}/CLAUDE.md`
-3. `{SESSION_ROOT}/{앱}/docs/FRONTEND-CONVENTIONS.md` (있으면 반드시)
+> 컨벤션 파일은 **서브에이전트가 직접 읽도록 경로를 프롬프트에 포함**한다.
+> 메인 세션에서 직접 읽어 요약하면 컨텍스트만 낭비되고 서브에이전트엔 전달이 안 된다.
 
-**확인 항목:** 컴포넌트 네이밍(`view-{domain}`/`drawer-{action}`/`dialog-{purpose}`), 4-파일 세트(`.ts`+`.html`+`.scss`+`.store.ts`), 클래스명(`View{X}Component`), Store 패턴(`signalStore()`+`withDevtools()`), Store 배치, Red Lines(hex 하드코딩·`@Injectable+plain signal`·`.scss` 생략 금지). 없으면 건너뛴다.
+impact_files 경로에서 앱을 탐지(예: `verida-ops/src/...` → `{SESSION_ROOT}/verida-ops`)한 뒤,
+Step 4 서브에이전트 프롬프트의 `## 컨벤션 파일` 항목에 아래 경로들을 기재한다:
+
+```
+## 컨벤션 파일 (코드 작성 전 반드시 Read)
+- {SESSION_ROOT}/CLAUDE.md
+- {PROJECT_ROOT}/CLAUDE.md              (있으면)
+- {PROJECT_ROOT}/docs/FRONTEND-CONVENTIONS.md   (있으면)
+```
+
+서브에이전트가 준수해야 할 핵심 항목 (메인 세션이 요약·첨부):
+- 컴포넌트 네이밍(`view-{domain}` / `drawer-{action}` / `dialog-{purpose}`)
+- 4-파일 세트 규칙, Store 패턴, Red Lines(hex 하드코딩 금지 등)
 
 ---
 
@@ -369,9 +386,16 @@ CLAIMED_FILE: {CLAIMED}   ← 현재 {SESSION_ROOT}/docs/tasks/doing/ 에 있음
 ## 현재 파일 상태 메모
 {Step 3-D에서 파악한 실제 상태 — task 설명과 다른 부분만 간략히 기재}
 
+## 컨벤션 파일 (코드 작성 전 반드시 Read)
+- {SESSION_ROOT}/CLAUDE.md
+- {PROJECT_ROOT}/CLAUDE.md              (있으면)
+- {PROJECT_ROOT}/docs/FRONTEND-CONVENTIONS.md   (있으면)
+{Step 3-C에서 탐지한 핵심 컨벤션 요약 첨부}
+
 ## 수행 절차 (순서대로 · 생략 불가)
 
 ### I. 코드 작성
+- **시작 전: 위 컨벤션 파일을 Read로 확인한 뒤 규칙을 적용**
 - task 파일에 `## 구현 체크리스트` 섹션이 있으면 **체크리스트 순회 모드**:
   첫 번째 `- [ ]` 항목 구현 → 완료 즉시 `- [x]` Edit → 다음 항목 반복 → 모두 완료 시 다음 단계
 - 체크리스트가 없으면 일괄 구현
