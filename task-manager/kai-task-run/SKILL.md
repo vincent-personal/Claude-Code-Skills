@@ -136,16 +136,24 @@ find "{SESSION_ROOT}/docs/tasks/.staging" -type f -mmin +30 -delete 2>/dev/null
 
 ---
 
-### Step 1 — 후보 선정 (FIFO · frontmatter만 읽기)
+### Step 1 — 사전 상태 수집 (FIFO 순회 전 준비)
 
 > 💡 **컨텍스트 절감**: 본문을 통째로 읽지 않는다. frontmatter만 추출:
 > `awk '/^---$/{c++; next} c==1' <file>`
 
 ```bash
-# 선행조건 만족 집합 = done/ 에 존재하는 id 목록
+# 1) 선행조건 만족 집합 — done/ 파일명에서 id 부분만 추출
 done_ids=$(ls "{SESSION_ROOT}"/docs/tasks/done/ 2>/dev/null | sed 's/--.*//')
-# 작업중(doing/) impact_files 합집합 = locked_files
-#   각 doing/*.md 의 frontmatter에서 impact_files 추출하여 합친다
+
+# 2) locked_files — 현재 doing/ 의 모든 impact_files 합집합
+#    다른 세션이 작업 중인 파일 목록. mv claim 전 사전 필터에 사용.
+locked_files=""
+for df in "{SESSION_ROOT}"/docs/tasks/doing/*.md; do
+  [ -e "$df" ] || continue
+  files=$(awk '/^---$/{c++; next} c==1 && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print}' "$df")
+  locked_files="$locked_files $files"
+done
+# locked_files: 공백 구분 파일 경로 목록 (중복 무방)
 ```
 
 `todo/` 를 **파일명 정렬순(= 생성순 = FIFO)** 으로 순회한다:
@@ -158,34 +166,71 @@ todo/ 가 비어있으면 → "실행할 작업이 없습니다." 보고 후 종
 
 ### Step 2 — 후보 검사 → 원자적 선점 (mv claim)
 
-각 후보 `f` 에 대해 순서대로:
+각 후보 `f` 에 대해 **순서대로** 검사한다. 어느 단계든 조건 불충족 시 `continue`(다음 후보).
 
-1. **선행조건 검사** — frontmatter `predecessors` 의 모든 id가 `done_ids` 에 있어야 한다. 하나라도 없으면 **skip(다음 후보)**.
-   인라인 `[]`·멀티라인 배열 모두 처리하는 추출:
-   ```bash
-   preds=$(awk '
-     /^---$/{c++; next}
-     c==1 && /^predecessors:[[:space:]]*\[/ {next}              # 인라인 [] → 선행조건 없음
-     c==1 && /^predecessors:[[:space:]]*$/ {inp=1; next}        # 멀티라인 시작
-     c==1 && inp && /^[[:space:]]*-[[:space:]]/ {gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next}
-     c==1 && inp && /^[^[:space:]-]/ {inp=0}
-   ' "{SESSION_ROOT}/docs/tasks/todo/$f")
-   # preds 의 각 id가 done_ids 에 모두 포함되는지 확인 — 하나라도 빠지면 continue
-   ```
-2. **영향 파일 기재 검사** — `impact_files` 가 비어있으면 skip하고 `blocked/` 로 이동 + 사유 "영향 파일 미기재" 기록(task-add 보강 필요).
-3. **원자적 선점** — `mv` 시도. 성공하면 내가 획득, 실패(다른 세션이 가져감)하면 다음 후보:
-   ```bash
-   if mv "{SESSION_ROOT}/docs/tasks/todo/$f" "{SESSION_ROOT}/docs/tasks/doing/$f" 2>/dev/null; then
-     CLAIMED="$f"
-   else
-     continue   # 경쟁에서 짐 → 다음 후보
-   fi
-   ```
-4. **선점 후 충돌 재검사** — 방금 claim한 파일의 `impact_files` ∩ (다른 doing/ 파일들의 impact_files) ≠ ∅ 이면 충돌:
-   - **tie-break: id가 더 작은(먼저 만든) 쪽이 우선권**. 내 id가 더 크면 양보 → `mv doing→todo` 롤백 후 다음 후보.
-   - 내 id가 더 작으면 유지하고 진행.
+#### 2-1. 선행조건 검사
 
-모든 후보가 선행조건 미충족/충돌/경쟁패배면 → "현재 착수 가능한 작업이 없습니다." 보고 후 종료.
+frontmatter `predecessors` 의 모든 id가 `done_ids` 에 있어야 한다:
+```bash
+preds=$(awk '
+  /^---$/{c++; next}
+  c==1 && /^predecessors:[[:space:]]*\[/ {next}
+  c==1 && /^predecessors:[[:space:]]*$/ {inp=1; next}
+  c==1 && inp && /^[[:space:]]*-[[:space:]]/ {gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next}
+  c==1 && inp && /^[^[:space:]-]/ {inp=0}
+' "{SESSION_ROOT}/docs/tasks/todo/$f")
+# preds 각 id가 done_ids에 없으면 → continue
+```
+
+#### 2-2. 영향 파일 기재 검사
+
+`impact_files` 가 비어있으면 → `blocked/` 이동 + 사유 "영향 파일 미기재" 기록 후 `continue`.
+
+#### 2-3. ★ locked_files 사전 겹침 검사 (mv 시도 전)
+
+> 이 검사가 다중 세션 파일 충돌의 **1차 방어선**이다.
+> `mv` 없이 건너뛰므로 불필요한 claim+rollback 사이클이 발생하지 않는다.
+
+후보 파일의 `impact_files`를 추출하여 `locked_files`(현재 doing/ 합집합)와 교집합을 확인한다:
+```bash
+candidate_files=$(awk '
+  /^---$/{c++; next}
+  c==1 && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print}
+' "{SESSION_ROOT}/docs/tasks/todo/$f")
+
+overlap=0
+for cf in $candidate_files; do
+  for lf in $locked_files; do
+    [ "$cf" = "$lf" ] && overlap=1 && break 2
+  done
+done
+[ $overlap -eq 1 ] && continue   # 다른 세션이 같은 파일 작업 중 → 다음 후보
+```
+
+#### 2-4. 원자적 선점 (mv claim)
+
+```bash
+if mv "{SESSION_ROOT}/docs/tasks/todo/$f" "{SESSION_ROOT}/docs/tasks/doing/$f" 2>/dev/null; then
+  CLAIMED="$f"
+else
+  continue   # 다른 세션이 동시에 가져감 → 다음 후보
+fi
+```
+
+#### 2-5. 선점 후 충돌 재검사 (경쟁 조건 최종 보루)
+
+> 2-3 검사와 2-4 mv 사이에 다른 세션이 같은 파일을 claim했을 수 있다(TOCTOU).
+> 이 검사가 **최종 보루**다.
+
+claim 직후 doing/ 전체를 다시 읽어 내 `impact_files` ∩ 타 doing 파일 impact_files 를 검사:
+- **겹침 발견 + 내 task id > 상대 task id** → 내가 나중에 등록된 작업이므로 양보:
+  `mv doing→todo` 롤백 후 `continue`
+- **겹침 발견 + 내 task id < 상대 task id** → 내가 먼저 등록된 작업이므로 유지하고 진행
+- **겹침 없음** → 그대로 진행
+
+---
+
+모든 후보가 선행조건 미충족/locked 겹침/경쟁패배/충돌 양보 → "현재 착수 가능한 작업이 없습니다." 보고 후 종료.
 
 선점 성공 시 frontmatter에 기록(Edit):
 ```yaml
