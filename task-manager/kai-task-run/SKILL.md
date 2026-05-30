@@ -275,53 +275,43 @@ impact_files 경로에서 앱을 탐지(예 `verida-ops/...` → verida-ops)한 
 
 ---
 
-### Step 4 — 코드 작성 (체크리스트 순회 또는 일괄 구현)
+### Step 4 — 구현 서브에이전트 위임 (컨텍스트 격리 · 필수)
 
-**파일 수정 전 반드시:**
-```bash
-# 1) 워크트리 검증 — 수정 대상이 PROJECT_ROOT 아래인지
-realpath {수정할 파일} 2>/dev/null || (cd "$(dirname {파일})" && pwd -P)
-#    결과가 PROJECT_ROOT 하위가 아니면 즉시 중단
-# 2) 영향 파일 등록 — 새로 수정하는 파일이 task 파일 impact_files에 없으면 먼저 append(Edit)
+> 🧹 **컨텍스트 누적 방지 설계**
+> 코드 읽기·빌드 출력·커밋 로그가 메인 세션에 쌓이면, 루프로 반복 실행 시 컨텍스트 한계를 초과하여 중단된다.
+> **코드 작성·빌드·커밋·완료 처리(Steps 4-I~4-V)를 전부 fresh Agent 서브에이전트에 위임한다.**
+> 메인 세션은 선점(mv claim)과 결과 수신·검증만 담당 → 루프 전체에 걸쳐 컨텍스트가 최소로 유지된다.
+
+**서브에이전트 호출:**
+
 ```
+Agent({
+  prompt: """
+당신은 아래 task를 완전히 자율 실행하는 구현 에이전트다.
+사용자 확인 없이 모든 결정을 스스로 내리고 즉시 실행한다.
 
-#### 4-A — 체크리스트 모드 (우선 확인)
+## 환경
+SESSION_ROOT: {SESSION_ROOT}
+PROJECT_ROOT: {PROJECT_ROOT}
+CLAIMED_FILE: {CLAIMED}   ← 현재 {SESSION_ROOT}/docs/tasks/doing/ 에 있음
 
-task 파일 본문에 `## 구현 체크리스트` 섹션이 있으면 **체크리스트 모드**로 진행한다.
+## Task 내용 (전체)
+{task 파일 전체 내용을 여기에 인라인으로 붙여넣기}
 
-```bash
-# 미완료 항목이 남아있는지 확인
-grep -c '^\- \[ \]' "{doing_task_file}" || echo 0
-```
+## 현재 파일 상태 메모
+{Step 3-D에서 파악한 실제 상태 — task 설명과 다른 부분만 간략히 기재}
 
-**체크리스트 순회 루프:**
+## 수행 절차 (순서대로 · 생략 불가)
 
-1. `- [ ]` 항목 중 **첫 번째 미완료 항목**을 읽는다.
-2. 해당 항목이 지시하는 구현을 **완전히** 수행한다 (Step 3-C 컨벤션 적용).
-3. 구현 완료 즉시 — **다음 항목으로 넘어가기 전에** — 해당 줄을 `- [x]`로 Edit:
-   ```bash
-   # 정확히 첫 번째 미완료 항목만 체크 (다른 줄 건드리지 않음)
-   # Edit 도구로 "- [ ] {항목 내용}" → "- [x] {항목 내용}" 교체
-   ```
-4. 다음 `- [ ]` 항목으로 이동하여 반복.
-5. **모든 항목이 `- [x]`** 가 되면 체크리스트 완료 → Step 5(빌드)로 진행.
+### I. 코드 작성
+- task 파일에 `## 구현 체크리스트` 섹션이 있으면 **체크리스트 순회 모드**:
+  첫 번째 `- [ ]` 항목 구현 → 완료 즉시 `- [x]` Edit → 다음 항목 반복 → 모두 완료 시 다음 단계
+- 체크리스트가 없으면 일괄 구현
+- 파일 수정 전: 워크트리 검증(`realpath`) + 새 파일이면 impact_files에 append(Edit)
+- task 설명 그대로 믿지 말고, 위 "현재 파일 상태 메모" 기준으로 출발점 조정
+- 막히면 80% 가능 시 자체 판단으로 계속; 완전 불가 시 `mv doing→blocked` + 사유 기록 후 "BLOCKED: {사유}" 반환
 
-> ⚠️ **항목 순서를 반드시 지킨다.** 앞 항목을 건너뛰고 뒤 항목을 먼저 구현하지 않는다.
-> ⚠️ **구현 직후 즉시 체크** — 다음 항목 구현 시작 전에 반드시 `- [x]` 로 마킹한다.
-> ⚠️ **빠뜨림 방지** — 각 항목 완료 후 `grep '^\- \[ \]'`로 미완료 항목이 남았는지 재확인한다.
-
-#### 4-B — 일반 모드 (체크리스트 없음)
-
-`## 구현 체크리스트` 섹션이 없으면 advisor 자문(Tier 3) 또는 자체 분석(Tier 1/2)을 바탕으로 일괄 코드 작성. **Step 3-C 컨벤션 적용.**
-
----
-
-막히면: 80% 이상 가능하면 자체 판단으로 계속. 완전히 불가능할 때만 `mv doing→blocked` + 본문에 사유 기록 후 종료.
-
----
-
-### Step 5 — 빌드/검증 (build lock)
-
+### II. 빌드 검증
 ```bash
 BUILD_LOCK="{PROJECT_ROOT}/.claude/build.lock"
 WAITED=0
@@ -329,115 +319,59 @@ while [ -f "$BUILD_LOCK" ] && [ $WAITED -lt 300 ]; do sleep 5; WAITED=$((WAITED+
 touch "$BUILD_LOCK"
 cd {PROJECT_ROOT} && npm run build 2>&1
 BUILD_RESULT=$?
-rm -f "$BUILD_LOCK"        # trap 미사용 — Claude Code 확인 팝업 방지
-exit $BUILD_RESULT
+rm -f "$BUILD_LOCK"
 ```
-빌드 실패 시 자체 수정 최대 3회. 3회 실패 시 `mv doing→blocked` + 사유 기록. **빌드는 반드시 PROJECT_ROOT에서.**
+빌드 실패 시 자체 수정 최대 3회. 3회 실패 → `mv doing→blocked` + 사유 기록 후 "BLOCKED: 빌드 실패" 반환
 
----
+### III. appVersion 증가 (environment.ts 있을 때만)
+- MINOR(신규 기능·페이지) / MAJOR(아키텍처) / PATCH(나머지, 기본값)
+- `sed`로 environment.ts + environment.prod.ts 동시 bump
 
-### Step 6 — Git 커밋 (필수 — 작업 하나 완료 = 커밋 하나)
-
-> ⚠️ **선택이 아니다.** 빌드 통과한 작업은 반드시 커밋. **작업 하나가 끝나면 즉시 커밋**(묶음 금지). push는 사용자 명시 요청 시에만.
-
-#### 6-A — appVersion 증가 (앱 CLAUDE.md 규칙)
-
-`src/environments/environment.ts`(+`.prod.ts`)가 있으면 bump. 없으면 생략.
-
-**① bump 레벨 (우선순위):**
-1. task 본문에 명시("MINOR/MAJOR/PATCH bump") → 그대로
-2. 명시 없으면 앱 CLAUDE.md `## ★ 버전 관리 규칙` 참조 후 자체 판단
-   - **MINOR**: 신규 페이지·기능·주요 UI 추가 / **MAJOR**: 아키텍처 변경·대규모 리팩토링 / **PATCH**: 버그픽스·CSS·문구·소규모
-   - 경계 애매 → **PATCH**(보수적)
-
-**② 계산:** `PATCH: Z+1 (Z≥99→Y+1.0)` / `MINOR: Y+1.0 (Y≥99→X+1.0.0)` / `MAJOR: X+1.0.0`
-
-**③ 적용 (BUMP_LEVEL):**
+### IV. Git 커밋
 ```bash
-VERSION_FILE="{PROJECT_ROOT}/src/environments/environment.ts"
-PROD_FILE="{PROJECT_ROOT}/src/environments/environment.prod.ts"
-[ -f "$VERSION_FILE" ] || echo "버전 파일 없음 — skip"
-CURRENT=$(grep "appVersion" "$VERSION_FILE" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
-IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
-case "$BUMP_LEVEL" in
-  MAJOR) MAJ=$((MAJ+1)); MIN=0; PAT=0 ;;
-  MINOR) MIN=$((MIN+1)); PAT=0; [ "$MIN" -ge 99 ] && { MAJ=$((MAJ+1)); MIN=0; } ;;
-  *)     PAT=$((PAT+1)); [ "$PAT" -ge 99 ] && { MIN=$((MIN+1)); PAT=0; }; [ "$MIN" -ge 99 ] && { MAJ=$((MAJ+1)); MIN=0; } ;;
-esac
-NEW_VERSION="$MAJ.$MIN.$PAT"
-sed -i '' "s/appVersion: '${CURRENT}'/appVersion: '${NEW_VERSION}'/" "$VERSION_FILE"
-[ -f "$PROD_FILE" ] && sed -i '' "s/appVersion: '${CURRENT}'/appVersion: '${NEW_VERSION}'/" "$PROD_FILE"
-git add "$VERSION_FILE" "$PROD_FILE" 2>/dev/null
-echo "버전 ${CURRENT} → ${NEW_VERSION} (${BUMP_LEVEL})"
+cd {PROJECT_ROOT} && git pull --rebase
+git add {수정·생성한 영향 파일들만}   # git add -A 금지
+git commit -m "feat(ops {id접미}): {제목}\n\n{bullet 요약}\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
 ```
+실패 시 최대 3회 재시도. 3회 모두 실패 → `mv doing→blocked` 후 "BLOCKED: 커밋 실패" 반환
 
-#### 6-B — 커밋
-
-```bash
-cd {PROJECT_ROOT}
-git pull --rebase
-git add {Step 4에서 수정·생성한 파일들만}      # 영향 파일 기준, git add -A 금지
-git commit -m "$(cat <<'EOF'
-feat(ops {id접미}): {제목 한 줄 요약}
-
-{변경 내용 2~4줄 bullet 요약}
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-EOF
-)"
-```
-- 메시지 형식: `feat(ops {id 짧은 접미, 예 a3f}): 제목` — 순차 #N 대신 task id 접미로 traceability 유지
-- `git add -A`/`git add .` 금지 — 영향 파일만 stage(버전 파일 포함)
-
-#### 6-C — ★ 커밋 해시 마커 기록 (mv 이전 · 필수)
-
-커밋 **성공 직후, Step 7의 mv 이전에** task 파일 frontmatter에 커밋 해시를 기록한다(Edit).
-이 마커가 있어야, 혹시 mv가 누락돼도 Step 0-B 화해가 **재실행 없이** done/ 으로 보낼 수 있다.
+### V. committed: 마커 기록 + mv doing→done
 ```bash
 HASH=$(cd {PROJECT_ROOT} && git rev-parse --short HEAD)
-# task 파일 frontmatter에 추가:  committed: {HASH}
+# task 파일 frontmatter에 Edit: committed: {HASH}
+# 완료 기록 append: ## 완료 기록\n✅ 완료: {요약} ({YYYY-MM-DD HH:MM})
+mv "{SESSION_ROOT}/docs/tasks/doing/{CLAIMED}" "{SESSION_ROOT}/docs/tasks/done/{CLAIMED}"
+# 검증
+ls "{SESSION_ROOT}/docs/tasks/done/{CLAIMED}" && echo "DONE_OK" || echo "DONE_FAIL"
 ```
 
-#### 6-D — 커밋 실패 처리 (분기 명확화)
+## 반환 형식 (마지막 줄에 반드시 출력)
+성공: `RESULT: done | commit={HASH} | files={수정파일목록}`
+실패: `RESULT: blocked | reason={사유}`
+  """
+})
+```
 
-> ⚠️ 어느 경우든 **doing/ 에 작업을 남긴 채 종료하지 않는다.**
+**서브에이전트 반환 후 메인 세션 처리:**
 
-- `git pull --rebase` 또는 commit 실패 → 최대 3회 재시도
-- **3회 모두 실패** → `committed:` 마커를 쓰지 **않고** `mv doing→blocked` + 본문에 사유 기록 후 종료 (done 금지)
-- **커밋 성공** → 6-C로 마커 기록 → Step 7(done 이동)
-- 즉, **커밋 성공이면 done, 실패면 blocked.** "doing 잔류"는 어느 분기에도 없다.
+| 반환값 | 메인 세션 동작 |
+|---|---|
+| `RESULT: done` | Step 4-V (done 존재 검증) 후 Step 5(아카이브) → Step 6(보고) |
+| `RESULT: blocked` | "blocked 처리 완료 — 사유: {reason}" 보고 후 종료 |
+| 응답 없음/오류 | doing/ 직접 확인 → committed: 있으면 화해(done 이동), 없으면 blocked 이동 |
+
+#### Step 4-V — done 존재 검증 (메인 세션 · 서브에이전트 완료 후)
+
+```bash
+ls "{SESSION_ROOT}/docs/tasks/done/$CLAIMED" >/dev/null 2>&1 \
+  && echo "✅ done 확인" \
+  || { echo "🚨 done 이동 실패 — 수동 화해 필요"; exit 1; }
+```
+존재 확인 후에만 Step 5(보고)로 진행한다.
 
 ---
 
-### Step 7 — 완료 처리 (mv doing→done) ★ 완료를 정의하는 행위
-
-> 🔒 **이 mv가 곧 "완료"의 정의다.** 파일이 `done/` 에 들어가기 전에는 **절대 "완료" 보고를 하지 않는다.**
-> 산문으로 "작업을 마쳤습니다" 라고 말하기 전에 반드시 아래 mv를 먼저 실행한다.
-> (완료 mv 누락이 가장 흔한 사고다 — 이 단계를 건너뛰면 run은 끝난 것이 아니다.)
-
-```bash
-# 1) 본문 끝에 완료 기록 append(Edit):  ## 완료 기록\n✅ 완료: {요약} ({YYYY-MM-DD HH:MM})
-# 2) done/ 으로 이동 (완료 정의 행위)
-mv "{SESSION_ROOT}/docs/tasks/doing/$CLAIMED" "{SESSION_ROOT}/docs/tasks/done/$CLAIMED"
-```
-`claimed_at`/`claimed_by`/`committed:` 는 그대로 두어 완료 이력으로 보존한다.
-
-#### Step 7-V — 완료 검증 (필수 · 선점-검증과 대칭)
-
-mv 직후, **`doing/` 에 본 작업 파일이 남아있지 않은지** 반드시 확인한다:
-```bash
-if [ -e "{SESSION_ROOT}/docs/tasks/doing/$CLAIMED" ]; then
-  # 아직 남아있음 → mv 재시도. 그래도 실패하면 사유와 함께 BLOCKED 보고
-  mv "{SESSION_ROOT}/docs/tasks/doing/$CLAIMED" "{SESSION_ROOT}/docs/tasks/done/$CLAIMED"
-fi
-# done/ 에 존재 확인되어야 비로소 "완료"
-ls "{SESSION_ROOT}/docs/tasks/done/$CLAIMED" >/dev/null 2>&1 && echo "✅ done 확인" || echo "🚨 완료 이동 실패"
-```
-`done/` 에 존재가 확인되어야만 Step 8(보고)로 진행한다.
-
----
-
-### Step 7-Z — 완료 디렉터리 정리 (아카이브 일원화 · run에서만)
+### Step 5 — 완료 디렉터리 정리 (아카이브 일원화 · run에서만)
 
 > 자동 아카이브는 **task-run에서만** 수행한다(task-add에서 제거됨 — `[x]`를 생산하는 주체가 run이므로).
 > 단, 본문을 읽지 않으므로 컨텍스트 부담은 사실상 없다 — 정리는 선택적 위생 작업이다.
@@ -482,3 +416,4 @@ cnt=$(ls "{SESSION_ROOT}"/docs/tasks/done/*.md 2>/dev/null | wc -l)
 - ❌ 버전 파일이 있는데 PATCH 증가 생략
 - ❌ **task 설명의 "현재 상태"를 그대로 믿고 구현 시작** — 반드시 impact_files를 Read로 직접 확인 후 실제 상태 기준으로 구현 (Step 3-D)
 - ❌ **시점 불일치 무시** — 선행 작업이 파일을 이미 변경했을 수 있음. A→C 태스크라도 실제 파일이 B 상태면 B→C로 재해석해야 함
+- ❌ **코드 작성·빌드·커밋을 메인 세션에서 직접 실행** — 반드시 Step 4 Agent 서브에이전트에 위임 (컨텍스트 누적 방지)
