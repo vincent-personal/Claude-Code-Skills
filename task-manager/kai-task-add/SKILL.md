@@ -65,17 +65,139 @@ allowed-tools:
 
 > **검증**: 경로에 하위 프로젝트 폴더명(`verida-ops/`, `verida-order/` 등)이 포함되어 있으면 잘못된 경로다 — 상위로 올라간다.
 
-```bash
-mkdir -p "{SESSION_ROOT}/docs/tasks/todo" \
-         "{SESSION_ROOT}/docs/tasks/doing" \
-         "{SESSION_ROOT}/docs/tasks/done" \
-         "{SESSION_ROOT}/docs/tasks/blocked" \
-         "{SESSION_ROOT}/docs/tasks/.staging"
+---
+
+### Step 1 — 등록 서브에이전트 위임 (컨텍스트 격리 · 필수)
+
+> 🧹 **컨텍스트 누적 방지**: task-add를 반복 실행하면 todo 스캔 결과·파일 탐색·advisor 응답이 메인 세션에 쌓인다.
+> Step 0에서 SESSION_ROOT를 확정한 직후, **이하 모든 등록 작업을 fresh Agent 서브에이전트에 위임**한다.
+> 메인 세션은 SESSION_ROOT 탐지와 결과 수신만 담당 → 반복 add 시에도 컨텍스트가 최소로 유지된다.
+
 ```
+Agent({
+  prompt: """
+당신은 task 등록 전용 에이전트다. 아래 작업 설명을 분석하여 task 파일을 생성하고 결과만 반환한다.
+구현은 절대 하지 않는다 — 오직 파일 등록만.
+
+## 환경
+SESSION_ROOT: {SESSION_ROOT}
+
+## 사용자 작업 설명
+{사용자 원문 그대로}
+
+## 수행 절차 (순서대로)
+
+### A. 디렉터리 초기화
+```bash
+mkdir -p "{SESSION_ROOT}/docs/tasks"/{todo,doing,done,blocked,.staging}
+```
+
+### B. 레거시 마이그레이션 (1회)
+`docs/check-list.md` 존재 + `docs/check-list.md.migrated` 부재 시:
+각 항목(`- [ ]/[~]/[x]/[!]`)을 상태별 디렉터리로 변환 후 `check-list.md` → `check-list.md.migrated` rename.
+
+### C. 컨벤션 파일 확인
+1. `{SESSION_ROOT}/CLAUDE.md`
+2. 해당 앱의 `CLAUDE.md` (impact_files 경로로 앱 탐지)
+3. `docs/FRONTEND-CONVENTIONS.md` (있으면)
+읽은 내용을 D~F 단계에 반영한다.
+
+### D. 기존 todo 스캔 (frontmatter만)
+```bash
+for f in "{SESSION_ROOT}"/docs/tasks/todo/*.md; do
+  [ -e "$f" ] || continue
+  awk '/^---$/{c++; next} c==1' "$f"
+done
+```
+수집: title + impact_files. 새 작업과 **동일 파일·컴포넌트·기능 범위** 항목이 있으면 신규 생성 대신 Edit으로 병합.
+(Edit 실패 = 파일이 doing/으로 이동됨 → 병합 포기하고 신규 생성)
+
+### E. 작업 분할 판단
+아래 중 하나라도 해당하면 여러 task 파일로 분할:
+- 독립 기능 2개 이상 혼재 / 레이어 혼재(백엔드+프론트+DB) / 영향 파일 8개 이상 / 순차 의존성 명확
+분할 시 후행 작업 frontmatter의 `predecessors:`에 선행 id 기재.
+
+### F. 영향 파일 식별 + Tier 판단
+영향 파일: Glob/Grep으로 탐색. 불명확 파일은 `?` 표시.
+Tier 기준:
+- 🟢 1: typo·포맷·1~5줄 수정·`[skip-advisor]`
+- 🟡 2: 동일 패턴 반복·7일 내 유사 자문
+- 🔴 3: 새 기능·구조 변경·외부 통합·DB·인증·결제·보안·`?` 파일 2개 이상
+
+Tier 3이면 advisor 에이전트(Opus) 호출:
+```
+Agent({subagent_type:"advisor", prompt:"[작업설명] ... [초안 영향파일] ... [요청] 1)완전한 파일목록 2)구현방안 3)엣지케이스"})
+```
+응답 수신 후: `?` 제거, 파일 병합, frontmatter `advisor: done` 설정, 구현 방안 본문 반영.
+
+### G. 화면 작업 감지
+영향 파일 확장자에 `.html`·`.scss`·`.css`·`.component.ts` 포함 또는 UI 키워드 포함 시:
+frontmatter `screen_work: true` + 본문에 `[화면 작업 필수]` 지침 추가.
+
+### H. 구현 체크리스트 생성 (Tier 2/3 또는 영향 파일 3개 이상)
+```markdown
+## 구현 체크리스트
+- [ ] {구체적 구현 내용 — 파일 단위·의존 순}
+- [ ] ...
+```
+최소 3개 ~ 최대 10개. Tier 1 또는 조건 미충족 시 생략.
+
+### I. task 파일 생성 (staging → 원자적 mv)
+```bash
+NS=$(date +%N 2>/dev/null); case "$NS" in ''|*[!0-9]*) NS=000000000;; esac
+ID="$(date +%Y%m%d-%H%M%S)-${NS}-$$-$(printf '%04x' $RANDOM)"
+slug=$(printf '%s' "{제목}" | tr '/[:space:]' '-' | tr -cd '[:alnum:]가-힣._-' | cut -c1-60)
+[ -z "$slug" ] && slug=task
+STAGE="{SESSION_ROOT}/docs/tasks/.staging/${ID}--${slug}.md"
+# STAGE에 완성된 파일 Write 후:
+mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/${ID}--${slug}.md"
+```
+포맷:
+```
+---
+id: {ID}
+title: {제목}
+created: {YYYY-MM-DD HH:MM}
+tier: {1|2|3}
+advisor: {done|skipped|pending}
+screen_work: {true|false}
+impact_files:
+  - path/to/file.ts
+predecessors: []
+claimed_at:
+claimed_by:
+committed:
+---
+## 작업 설명
+{What / How / Note}
+## 구현 방안 (advisor)
+{Tier 3 시 기재, 아니면 생략}
+## 구현 체크리스트
+{H단계 조건 충족 시 기재}
+- [ ] ...
+```
+
+## 반환 형식 (마지막 줄에 반드시 출력)
+신규 생성: `RESULT: created | id={ID} | title={제목} | tier={Tier}`
+기존 병합: `RESULT: merged  | file={파일명} | title={제목}`
+분할 생성: `RESULT: split   | count={N} | titles={제목1, 제목2, ...}`
+  """
+})
+```
+
+**서브에이전트 반환 후 메인 세션 처리:**
+반환된 `RESULT:` 한 줄을 사용자에게 그대로 보고하고 종료한다.
 
 ---
 
-### Step 0-M — 레거시 자동 마이그레이션 (1회 · add/run 공통)
+## 📋 서브에이전트 내부 절차 상세 (참고용 — 메인 세션에서 직접 실행하지 않음)
+
+> 아래 단계들은 Step 1의 Agent 프롬프트 안에서 서브에이전트가 실행한다.
+> 메인 세션은 Step 0 + Step 1(위임) + 결과 수신만 처리한다.
+
+---
+
+### (참고) Step 0-M — 레거시 자동 마이그레이션 (1회 · add/run 공통)
 
 **가드**: `docs/check-list.md` 가 **존재**하고 `docs/check-list.md.migrated` 가 **부재**하면 변환한다.
 (todo/ 비어있음 여부로 판단하지 않는다 — 사용자가 신규 add를 먼저 해도 기존 작업이 누락되지 않도록.)
@@ -312,6 +434,7 @@ mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/${ID}--${slug}.md"
 
 - ❌ **작업을 직접 실행하거나 코드를 수정하는 행위** — 이 스킬은 작업 등록 **전용**
 - ❌ **스스로 구현 시작** — 구현은 `/kai-task-run` 담당
+- ❌ **todo 스캔·파일 탐색·advisor 호출을 메인 세션에서 직접 실행** — Step 1 Agent 서브에이전트에 위임 (컨텍스트 누적 방지)
 - ❌ task 파일을 `done/` 등 todo/ 외 디렉터리에 생성
 - ❌ **빈 파일 선생성**(noclobber 등) — 반드시 staging 완성본 → 원자적 mv
 - ❌ **병합 시 Write로 todo 파일 재생성** — Edit-only, 실패 시 신규파일 fallback
