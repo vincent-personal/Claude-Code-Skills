@@ -62,6 +62,53 @@ if [ -f "$SKILLS_DIR/advisor.md" ]; then
   fi
 fi
 
+# 3) settings.json 권한 패치 — 워커 에이전트가 멈추지 않도록 필요한 Bash 패턴 추가
+SETTINGS="$HOME/.claude/settings.json"
+echo "🔐 settings.json Bash 권한 패치..."
+
+if [ ! -f "$SETTINGS" ]; then
+  echo "  ⚠️  $SETTINGS 가 없습니다. 건너뜁니다."
+else
+  # 추가할 패턴 목록
+  PATTERNS=(
+    "Bash(mv:*)"
+    "Bash(stat:*)"
+    "Bash(awk:*)"
+    "Bash(grep:*)"
+    "Bash(wc:*)"
+    "Bash(sed:*)"
+    "Bash(basename:*)"
+    "Bash(sort:*)"
+    "Bash(head:*)"
+    "Bash(git checkout:*)"
+    "Bash(git branch:*)"
+    "Bash(git merge:*)"
+  )
+
+  for pattern in "${PATTERNS[@]}"; do
+    # 이미 존재하면 건너뜀
+    if grep -q "\"$pattern\"" "$SETTINGS" 2>/dev/null; then
+      echo "  ✓ 이미 있음: $pattern"
+    else
+      # "allow": [ 배열 안 첫 번째 항목 앞에 삽입 (portable python3 사용)
+      python3 - "$SETTINGS" "$pattern" <<'PYEOF'
+import sys, json
+path, pat = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    data = json.load(f)
+allow = data.setdefault("permissions", {}).setdefault("allow", [])
+if pat not in allow:
+    allow.append(pat)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    print(f"  ✓ 추가됨: {pat}")
+else:
+    print(f"  ✓ 이미 있음: {pat}")
+PYEOF
+    fi
+  done
+fi
+
 echo ""
 echo "✅ 설치 완료!"
 echo ""
