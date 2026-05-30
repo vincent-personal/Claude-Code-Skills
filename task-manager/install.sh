@@ -32,7 +32,7 @@ done
 echo ""
 
 # 1) 스킬 설치 (kai- prefix)
-for skill in kai-task-add kai-task-run kai-task-clear kai-task-list; do
+for skill in kai-task-add kai-task-run kai-task-clear kai-task-list kai-task-unblock; do
   TARGET_FILE="$TARGET_SKILLS_DIR/$skill/SKILL.md"
 
   if [ -e "$TARGET_FILE" ] && [ ! -L "$TARGET_FILE" ]; then
@@ -47,30 +47,35 @@ for skill in kai-task-add kai-task-run kai-task-clear kai-task-list; do
   echo "✓ 스킬 $skill → $TARGET_FILE"
 done
 
-# 2) advisor 에이전트 설치 (prefix 없음 — 슬래시 호출 대상 아님)
-if [ -f "$SKILLS_DIR/advisor.md" ]; then
-  TARGET_ADVISOR="$TARGET_AGENTS_DIR/advisor.md"
+# 2) 에이전트 설치 (prefix 없음 — subagent_type으로 호출)
+for agent in advisor.md kai-task-worker.md; do
+  if [ -f "$SKILLS_DIR/$agent" ]; then
+    TARGET_AGENT="$TARGET_AGENTS_DIR/$agent"
 
-  if [ -e "$TARGET_ADVISOR" ] && [ ! -L "$TARGET_ADVISOR" ]; then
-    echo ""
-    echo "⚠️  $TARGET_ADVISOR 가 이미 존재하나 심볼릭 링크가 아닙니다."
-    echo "   기존 advisor를 유지합니다. 덮어쓰려면 백업 후 재실행하세요."
-  else
-    mkdir -p "$TARGET_AGENTS_DIR"
-    ln -sf "$SKILLS_DIR/advisor.md" "$TARGET_ADVISOR"
-    echo "✓ 에이전트 advisor → $TARGET_ADVISOR"
+    if [ -e "$TARGET_AGENT" ] && [ ! -L "$TARGET_AGENT" ]; then
+      echo "⚠️  $TARGET_AGENT 가 이미 존재하나 심볼릭 링크가 아닙니다. 건너뜁니다."
+    else
+      mkdir -p "$TARGET_AGENTS_DIR"
+      ln -sf "$SKILLS_DIR/$agent" "$TARGET_AGENT"
+      echo "✓ 에이전트 ${agent%.md} → $TARGET_AGENT"
+    fi
   fi
-fi
+done
 
 # 3) settings.json 권한 패치 — 워커 에이전트가 멈추지 않도록 필요한 Bash 패턴 추가
 SETTINGS="$HOME/.claude/settings.json"
 echo "🔐 settings.json Bash 권한 패치..."
 
 if [ ! -f "$SETTINGS" ]; then
-  echo "  ⚠️  $SETTINGS 가 없습니다. 건너뜁니다."
-else
+  echo "  📝 $SETTINGS 가 없습니다. 기본 파일 생성 중..."
+  mkdir -p "$(dirname "$SETTINGS")"
+  echo '{"permissions":{"allow":[],"defaultMode":"auto"}}' > "$SETTINGS"
+fi
+
+if [ -f "$SETTINGS" ]; then
   # 추가할 패턴 목록
   PATTERNS=(
+    # 파일 시스템
     "Bash(mv:*)"
     "Bash(stat:*)"
     "Bash(awk:*)"
@@ -80,9 +85,57 @@ else
     "Bash(basename:*)"
     "Bash(sort:*)"
     "Bash(head:*)"
+    "Bash(find:*)"
+    "Bash(ls:*)"
+    "Bash(mkdir:*)"
+    "Bash(rm:*)"
+    "Bash(touch:*)"
+    "Bash(realpath:*)"
+    "Bash(date:*)"
+    "Bash(echo:*)"
+    "Bash(python3:*)"
+    # git
+    "Bash(git add:*)"
+    "Bash(git commit:*)"
+    "Bash(git pull:*)"
+    "Bash(git pull --rebase:*)"
+    "Bash(git push:*)"
+    "Bash(git status:*)"
+    "Bash(git diff:*)"
+    "Bash(git log:*)"
+    "Bash(git show:*)"
+    "Bash(git rev-parse:*)"
     "Bash(git checkout:*)"
     "Bash(git branch:*)"
     "Bash(git merge:*)"
+    # npm / Node
+    "Bash(npm run:*)"
+    "Bash(npm run build:*)"
+    # dotnet / EF Core
+    "Bash(dotnet build:*)"
+    "Bash(dotnet run:*)"
+    "Bash(dotnet test:*)"
+    "Bash(dotnet ef:*)"
+    "Bash(dotnet ef dbcontext scaffold:*)"
+    "Bash(dotnet ef migrations:*)"
+    "Bash(dotnet ef database:*)"
+    # curl
+    "Bash(curl:*)"
+    # 텍스트 처리 / 유틸
+    "Bash(sleep:*)"
+    "Bash(tr:*)"
+    "Bash(which:*)"
+    "Bash(cat:*)"
+    "Bash(dirname:*)"
+    "Bash(pwd:*)"
+    # git 추가
+    "Bash(git push:*)"
+    "Bash(git push origin:*)"
+    "Bash(git stash:*)"
+    "Bash(git stash pop:*)"
+    # npm 추가
+    "Bash(npm install:*)"
+    "Bash(npx:*)"
   )
 
   for pattern in "${PATTERNS[@]}"; do
