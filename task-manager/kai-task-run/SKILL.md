@@ -276,12 +276,21 @@ Agent({
 
 ### Step 3-B — 화면 작업 여부 확인
 
-frontmatter `screen_work: true` 이거나 impact_files 확장자(`.html`·`.scss`·`.css`·`.component.ts`)·설명에 UI 키워드("화면/UI/컴포넌트/뷰/스타일/레이아웃/페이지/모달/드로어/폼/버튼/카드/테이블") 포함 시 — **Step 5 전에 반드시:**
+frontmatter `screen_work: true` 이거나 impact_files 확장자(`.html`·`.scss`·`.css`·`.component.ts`)·설명에 UI 키워드("화면/UI/컴포넌트/뷰/스타일/레이아웃/페이지/모달/드로어/폼/버튼/카드/테이블") 포함 시:
 
+**Step 4 서브에이전트 위임 전(메인 세션에서):**
 1. **브라우저 확인(구현 전)**: Playwright MCP(`mcp__plugin_ecc_playwright__`) 또는 `/browse` 로 현재 화면 스크린샷
 2. **레퍼런스 조회**: `ecc:docs-lookup` 또는 Context7 MCP로 UI 프레임워크 최신 API 확인
-3. **구현 후 브라우저 검증**: 코드 작성(Step 5) 후 Playwright MCP로 실제 화면 재확인
-4. **디자인 검토**: `design-review` 또는 `ecc:frontend-design` 로 일관성 검토
+
+→ 스크린샷·API 참고 내용을 Step 4 서브에이전트 프롬프트의 **"현재 파일 상태 메모"** 항목에 함께 전달한다.
+
+**서브에이전트 프롬프트에 추가할 화면 작업 지침 (Step 4 호출 시 포함):**
+```
+## 화면 작업 추가 지침
+- 구현 후 반드시: npm run build 전에 Playwright MCP로 실제 화면 확인
+- 디자인 토큰(var(--*)) 사용, hex 하드코딩 금지
+- design-review 또는 ecc:frontend-design으로 일관성 검토
+```
 
 ---
 
@@ -294,6 +303,20 @@ impact_files 경로에서 앱을 탐지(예 `verida-ops/...` → verida-ops)한 
 3. `{SESSION_ROOT}/{앱}/docs/FRONTEND-CONVENTIONS.md` (있으면 반드시)
 
 **확인 항목:** 컴포넌트 네이밍(`view-{domain}`/`drawer-{action}`/`dialog-{purpose}`), 4-파일 세트(`.ts`+`.html`+`.scss`+`.store.ts`), 클래스명(`View{X}Component`), Store 패턴(`signalStore()`+`withDevtools()`), Store 배치, Red Lines(hex 하드코딩·`@Injectable+plain signal`·`.scss` 생략 금지). 없으면 건너뛴다.
+
+---
+
+### Step 3-C-2 — PROJECT_ROOT 확정 (서브에이전트 위임 전 필수)
+
+서브에이전트 프롬프트에 `PROJECT_ROOT`를 넘겨야 하므로, **Step 4 호출 전에 반드시 결정**한다.
+
+```bash
+# impact_files 첫 번째 경로에서 git 루트 탐지
+FIRST_FILE="{impact_files 중 첫 번째}"
+PROJECT_ROOT=$(cd "$(dirname "$FIRST_FILE")" && git rev-parse --show-toplevel 2>/dev/null || echo "{SESSION_ROOT}")
+```
+
+> SESSION_ROOT(tasks 위치) ≠ PROJECT_ROOT(코드·빌드 위치). 혼용 금지.
 
 ---
 
@@ -401,9 +424,9 @@ ls "{SESSION_ROOT}/docs/tasks/done/{CLAIMED}" && echo "DONE_OK" || echo "DONE_FA
 
 | 반환값 | 메인 세션 동작 |
 |---|---|
-| `RESULT: done` | Step 4-V (done 존재 검증) 후 Step 5(아카이브) → Step 6(보고) |
+| `RESULT: done` | Step 4-V (done 존재 검증) 후 Step 5(아카이브) → Step 6(완료 보고) |
 | `RESULT: blocked` | "blocked 처리 완료 — 사유: {reason}" 보고 후 종료 |
-| 응답 없음/오류 | doing/ 직접 확인 → committed: 있으면 화해(done 이동), 없으면 blocked 이동 |
+| 응답 없음/오류 | doing/ 직접 확인 → `committed:` 있으면 화해(done 이동), 없으면 blocked 이동 |
 
 #### Step 4-V — done 존재 검증 (메인 세션 · 서브에이전트 완료 후)
 
@@ -412,7 +435,7 @@ ls "{SESSION_ROOT}/docs/tasks/done/$CLAIMED" >/dev/null 2>&1 \
   && echo "✅ done 확인" \
   || { echo "🚨 done 이동 실패 — 수동 화해 필요"; exit 1; }
 ```
-존재 확인 후에만 Step 5(보고)로 진행한다.
+존재 확인 후에만 Step 5(아카이브) → Step 6(완료 보고)로 진행한다.
 
 ---
 
@@ -430,35 +453,47 @@ cnt=$(ls "{SESSION_ROOT}"/docs/tasks/done/*.md 2>/dev/null | wc -l)
 
 ---
 
-### Step 8 — 완료 보고
+### Step 6 — 완료 보고
 
-완수한 작업 id·제목·수정 파일 목록을 사용자에게 보고한다.
+완수한 작업 id·제목·커밋 해시·수정 파일 목록을 사용자에게 보고한다.
+(Step 4 서브에이전트의 `RESULT: done | commit={HASH} | files={목록}` 을 그대로 활용)
 
 ---
 
 ## Red Lines (절대 금지)
 
+### 워크트리·경로
 - ❌ `git worktree add` / `cp`·`rsync` 워크트리 동기화
 - ❌ `PROJECT_ROOT` 외부 경로 파일 수정
-- ❌ `doing/` 에 이미 있는(=다른 세션 작업 중) 파일 착수
+- ❌ 워크트리에서만 빌드 통과 확인 후 완료 처리
+
+### 선점·충돌
 - ❌ **mv claim 없이 작업 시작** — 반드시 todo→doing 원자 선점 성공 후 착수
-- ❌ **영향 파일(impact_files) 충돌 검사 생략** — 다중 에이전트 환경에서 치명적
+- ❌ **영향 파일(impact_files) 충돌 검사 생략** (2-3·2-5) — 다중 에이전트 환경에서 치명적
+- ❌ `doing/` 에 이미 있는 파일 착수 — locked_files 사전 검사(2-3)로 방지
 - ❌ 영향 파일 미기재 작업 임의 처리 (blocked/ 이동 후 보강)
 - ❌ mv claim 실패를 오류로 보고 종료 (다음 후보로 진행해야 함)
-- ❌ 워크트리에서만 빌드 통과 확인 후 완료 처리
-- ❌ 작업 실패 시 done/ 으로 이동 (실패는 blocked/)
-- ❌ **`doing/` 에 작업을 남긴 채 run 종료** — 반드시 done/(커밋 성공) 또는 blocked/(3회 실패)로 이동. 잔류 = 사고
-- ❌ **`done/` 이동(Step 7) 전에 "완료" 보고** — mv가 완료의 정의. 검증(Step 7-V)까지 통과해야 보고
-- ❌ 커밋 성공 후 `committed:` 마커 기록 생략 (Step 6-C) — 마커 없으면 완료-고아 화해 불가
-- ❌ **`committed:` 마커가 있는 doing/ 고아를 재실행** — Step 0-B에서 곧장 done/ 으로 화해할 것 (중복 커밋 방지)
 - ❌ 한 번에 두 개 이상 작업 동시 착수
+
+### 완료 처리
+- ❌ 작업 실패 시 done/ 으로 이동 (실패는 blocked/)
+- ❌ **`doing/` 에 작업을 남긴 채 run 종료** — done/(커밋 성공) 또는 blocked/(3회 실패)로 반드시 이동
+- ❌ **done/ 이동(Step 4-V 검증) 전에 "완료" 보고** — mv가 완료의 정의
+- ❌ 커밋 성공 후 `committed:` 마커 기록 생략 — 마커 없으면 완료-고아 화해 불가
+- ❌ **`committed:` 마커가 있는 doing/ 고아를 재실행** — Step 0-B에서 done/ 으로 화해할 것 (중복 커밋 방지)
+
+### 구현·빌드·커밋 (서브에이전트 내부 규칙 — 서브에이전트가 준수)
+- ❌ **코드 작성·빌드·커밋을 메인 세션에서 직접 실행** — 반드시 Step 4 Agent 서브에이전트에 위임
 - ❌ Tier 3 작업을 advisor 없이 착수 (`advisor: done` 이면 생략 정상)
-- ❌ `.claude/user.lock` 존재 시 무시하고 진행
-- ❌ 빌드 lock 무시하고 동시 빌드
-- ❌ Step 4에서 수정하지 않은 파일까지 `git add` / `git add -A`·`git add .`
-- ❌ 빌드 통과 후 커밋 생략 — Step 6은 매 작업 필수
+- ❌ 수정하지 않은 파일까지 `git add` / `git add -A`·`git add .`
+- ❌ 빌드 통과 후 커밋 생략 — 작업 완료 = 커밋 필수
 - ❌ 여러 작업 묶음 커밋 — 작업 하나당 커밋 하나
 - ❌ 버전 파일이 있는데 PATCH 증가 생략
-- ❌ **task 설명의 "현재 상태"를 그대로 믿고 구현 시작** — 반드시 impact_files를 Read로 직접 확인 후 실제 상태 기준으로 구현 (Step 3-D)
-- ❌ **시점 불일치 무시** — 선행 작업이 파일을 이미 변경했을 수 있음. A→C 태스크라도 실제 파일이 B 상태면 B→C로 재해석해야 함
-- ❌ **코드 작성·빌드·커밋을 메인 세션에서 직접 실행** — 반드시 Step 4 Agent 서브에이전트에 위임 (컨텍스트 누적 방지)
+
+### 잠금
+- ❌ `.claude/user.lock` 존재 시 무시하고 진행
+- ❌ 빌드 lock 무시하고 동시 빌드
+
+### 시점 불일치
+- ❌ **task 설명의 "현재 상태"를 그대로 믿고 구현 시작** — impact_files를 Read로 직접 확인 후 실제 상태 기준으로 구현 (Step 3-D)
+- ❌ **시점 불일치 무시** — A→C 태스크라도 실제 파일이 B 상태면 B→C로 재해석해야 함
