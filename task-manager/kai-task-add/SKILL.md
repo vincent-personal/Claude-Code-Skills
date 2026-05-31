@@ -155,6 +155,21 @@ Agent({subagent_type:"advisor", prompt:"[작업설명] ... [초안 영향파일]
 ```
 응답 수신 후: `?` 제거, 파일 병합, frontmatter `advisor: done` 설정, 구현 방안 본문 반영.
 
+> ⚠️ **impact_files는 반드시 frontmatter 배열로 기록한다. 본문에만 쓰는 것은 무효.**
+>
+> ❌ 잘못된 예 (본문에만):
+> ```markdown
+> ## 영향 파일
+> - src/app/pages/products/view-products.html
+> ```
+>
+> ✅ 올바른 예 (frontmatter 배열):
+> ```yaml
+> impact_files:
+>   - src/app/pages/products/view-products/view-products.html
+> ```
+> 본문에 영향 파일을 설명하는 것은 가능하나, frontmatter `impact_files:` 배열이 **반드시 함께** 있어야 한다.
+
 ### G. 화면 작업 감지
 영향 파일 확장자에 `.html`·`.scss`·`.css`·`.component.ts` 포함 또는 UI 키워드 포함 시:
 frontmatter `screen_work: true` + 본문에 `[화면 작업 필수]` 지침 추가.
@@ -187,6 +202,15 @@ STAGE="{SESSION_ROOT}/docs/tasks/.staging/{FILENAME}"
 mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/{FILENAME}"
 ```
 
+**I-c. 생성 후 impact_files 필수 검증 (Bash 툴로 실행):**
+```bash
+FILE="{SESSION_ROOT}/docs/tasks/todo/{FILENAME}"
+awk '/^---$/{c++; next} c==1 && /^impact_files:/{found=1} END{exit !found}' "$FILE" \
+  && echo "OK: impact_files 확인" \
+  || echo "ERROR: impact_files 누락 — 즉시 Edit으로 추가 후 재검증"
+```
+`ERROR` 출력 시 → `impact_files:` 배열을 frontmatter에 Edit으로 추가 → 재검증 통과 후에만 `RESULT:` 반환.
+
 포맷:
 ```
 ---
@@ -213,15 +237,16 @@ committed:
 ```
 
 ## 반환 형식 (마지막 줄에 반드시 출력)
-신규 생성: `RESULT: created | id={ID} | title={제목} | tier={Tier}`
-기존 병합: `RESULT: merged  | file={파일명} | title={제목}`
-분할 생성: `RESULT: split   | count={N} | titles={제목1, 제목2, ...}`
+신규 생성: `RESULT: created | id={ID} | title={제목} | tier={Tier} | impact_files={파일1,파일2,...}`
+기존 병합: `RESULT: merged  | file={파일명} | title={제목} | impact_files={파일1,...}`
+분할 생성: `RESULT: split   | count={N} | titles={제목1,제목2,...} | impact_files={파일1,...}`
   """
 })
 ```
 
 **서브에이전트 반환 후 메인 세션 처리:**
-반환된 `RESULT:` 한 줄을 사용자에게 그대로 보고하고 종료한다.
+반환된 `RESULT:` 에서 `impact_files=` 필드가 없으면 → 실패로 간주하고 사용자에게 오류 보고.
+있으면 → `RESULT:` 한 줄을 사용자에게 보고하고 종료한다.
 
 ---
 
@@ -482,6 +507,8 @@ mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/{FILENAME}"
 - ❌ **빈 파일 선생성**(noclobber 등) — 반드시 staging 완성본 → 원자적 mv
 - ❌ **TASK_ID를 서브에이전트가 직접 생성** — Step 0-F 메인 세션 bash 출력값만 사용
 - ❌ **`--{slug}` 구분자 생략** — slug 없어도 `--task` 필수 (`{ID}.md` 형식 금지)
+- ❌ **impact_files를 본문에만 기재** — frontmatter `impact_files:` 배열이 반드시 있어야 함 (I-c 검증 필수)
+- ❌ **impact_files 없이 RESULT: 반환** — I-c 통과 후에만 RESULT: 출력 가능
 - ❌ **병합 시 Write로 todo 파일 재생성** — Edit-only, 실패 시 신규파일 fallback
 - ❌ **영향 파일(impact_files) 없이 생성** (충돌 검사 무력화)
 - ❌ frontmatter에 `status` 필드 추가 (디렉터리가 권위 — drift 유발)
