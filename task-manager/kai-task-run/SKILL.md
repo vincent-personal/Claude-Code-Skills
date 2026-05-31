@@ -34,7 +34,6 @@ allowed-tools:
 메인 세션 (얇은 루프 · 컨텍스트 최소)
   ┌─ Step 0-A: 잠금확인 + 좀비복구 + todo확인 [단일 Bash]  ← 루프 시작점
   │  Step 2:   작업 선점 (mv claim)
-  │  Step 3:   needs_advisor: true 시 advisor 호출 (메인 세션에서 직접)
   │  Step 4:   백그라운드 워커 스폰 (Agent run_in_background: true)
   │  Step 5:   done/ 또는 blocked/ 폴링 (sleep 5)
   └─ Step 6:   완료 보고 → Step 0-A로 루프
@@ -162,21 +161,6 @@ CLAIMED="$f"
 
 ---
 
-### Step 3 — Advisor 호출 (선택적 · 메인 세션에서)
-
-frontmatter `needs_advisor: true` + `advisor: done` 아닌 경우에만:
-
-```
-Agent({
-  subagent_type: "advisor",
-  prompt: "작업: {task 전체 내용} | SESSION_ROOT: {SESSION_ROOT} | 요청: 완전한 impact_files + 구현방안 + 엣지케이스"
-})
-```
-
-응답 수신 후 task 파일 impact_files 업데이트 + `advisor: done` 기록(Edit).
-
-> Tier(1/2/3)는 복잡도 참고용 — Advisor 자동 호출 기준 아님.
-
 ---
 
 ### Step 4 — 백그라운드 워커 스폰
@@ -258,7 +242,7 @@ CLAIMED_FILE: {{SESSION_ROOT}}/docs/tasks/doing/{{CLAIMED}}
 {{SESSION_ROOT}}/docs/tasks/doing/{{CLAIMED}}
 ```
 
-`impact_files`, `tier`, `skip_build`, `needs_advisor`, `predecessors` 파악.
+`impact_files`, `tier`, `skip_build`, `predecessors` 파악.
 
 PROJECT_ROOT 결정:
 ```bash
