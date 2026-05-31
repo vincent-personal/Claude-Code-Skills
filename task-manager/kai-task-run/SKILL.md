@@ -33,9 +33,9 @@ allowed-tools:
 ```
 메인 세션 (얇은 루프 · 컨텍스트 최소)
   ┌─ Step 0-A: 잠금확인 + 좀비복구 + todo확인 [단일 Bash]  ← 루프 시작점
-  │  Step 2:   작업 선점 (mv claim)
-  │  Step 4:   백그라운드 워커 스폰 (Agent run_in_background: true)
-  │  Step 5:   done/ 또는 blocked/ 폴링 (sleep 5)
+  │  Step 2:   충돌없는 배치 선점 (impact_files 교집합 없는 task 묶음 → mv claim)
+  │  Step 4:   배치 병렬 스폰 (BATCH의 각 task → Agent 동시 호출)
+  │  Step 5:   배치 폴링 (모든 워커 done/blocked 감지까지 대기)
   └─ Step 6:   완료 보고 → Step 0-A로 루프
 
 백그라운드 워커 (작업 1개 완수 후 조용히 종료)
@@ -125,9 +125,11 @@ echo "remaining=$remaining"
 
 ---
 
-### Step 2 — 후보 선정 + 원자 선점
+### Step 2 — 충돌없는 배치 선정 + 원자 선점
 
-**준비:**
+**최대 동시 워커 수: 5개** (git push race 방지)
+
+**준비 — 기존 doing/ 파일 잠금 목록 구성:**
 ```bash
 done_ids=$(ls "{SESSION_ROOT}"/docs/tasks/done/ 2>/dev/null | sed 's/--.*//')
 locked_files=""
@@ -136,77 +138,106 @@ for df in "{SESSION_ROOT}"/docs/tasks/doing/*.md; do
   files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$df")
   locked_files="$locked_files $files"
 done
+BATCH=()        # 이번 루프에서 선점할 task 파일명 배열
+batch_files=""  # BATCH에 포함된 task들의 impact_files 누적 (배치 내 충돌 방지용)
 ```
 
-**todo/ FIFO 순회** — 각 후보 `f` 에 대해:
+**todo/ FIFO 순회 — 배치 구성:**
 
-**① 선행조건** — `predecessors` 의 모든 id가 `done_ids` 에 있어야 함.
+각 후보 `f` 에 대해 순서대로:
 
-**② impact_files 추출 + locked_files 겹침 검사:**
+**① 선행조건** — `predecessors` 의 모든 id가 `done_ids` 에 있어야 함. 아니면 skip.
+
+**② impact_files 추출:**
 ```bash
 candidate_files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "{SESSION_ROOT}/docs/tasks/todo/$f")
 [ -z "$candidate_files" ] && mv "{SESSION_ROOT}/docs/tasks/todo/$f" "{SESSION_ROOT}/docs/tasks/blocked/$f" && continue
 ```
-겹치면 skip.
 
-**③ 원자 선점:**
+**③ 충돌 검사 — locked_files + batch_files 모두와 교집합 확인:**
 ```bash
-mv "{SESSION_ROOT}/docs/tasks/todo/$f" "{SESSION_ROOT}/docs/tasks/doing/$f" 2>/dev/null || continue
-CLAIMED="$f"
+overlap=0
+for cf in $candidate_files; do
+  echo "$locked_files $batch_files" | grep -qF "$cf" && overlap=1 && break
+done
+[ $overlap -eq 1 ] && continue  # 이번 배치에서 제외 (다음 루프에서 처리)
 ```
 
-선점 성공 시 frontmatter에 `claimed_at` / `claimed_by` 기록(Edit).
+**④ 배치 추가:**
+```bash
+BATCH+=("$f")
+batch_files="$batch_files $candidate_files"
+[ ${#BATCH[@]} -ge 5 ] && break  # 최대 5개
+```
 
-모든 후보 실패 → "착수 가능한 작업 없음." 출력 후 **종료**.
+**배치 전체 원자 선점:**
+```bash
+CLAIMED_BATCH=()
+for f in "${BATCH[@]}"; do
+  mv "{SESSION_ROOT}/docs/tasks/todo/$f" "{SESSION_ROOT}/docs/tasks/doing/$f" 2>/dev/null && CLAIMED_BATCH+=("$f")
+done
+```
+
+선점 성공한 각 파일에 frontmatter `claimed_at` / `claimed_by` 기록(Edit).
+
+`${#CLAIMED_BATCH[@]} -eq 0` → "착수 가능한 작업 없음." 출력 후 **종료**.
 
 ---
 
 ---
 
-### Step 4 — 백그라운드 워커 스폰
+### Step 4 — 배치 병렬 스폰
+
+`CLAIMED_BATCH`의 각 task에 대해 **하나의 응답에서 Agent를 동시 호출**한다:
 
 ```
+# CLAIMED_BATCH의 각 f에 대해 동시에 (parallel):
 Agent({
   subagent_type: "kai-task-worker",
   run_in_background: true,
   prompt: """
 SESSION_ROOT: {SESSION_ROOT}
-CLAIMED_FILE: {SESSION_ROOT}/docs/tasks/doing/{CLAIMED}
-PROJECT_ROOT: {PROJECT_ROOT}
+CLAIMED_FILE: {SESSION_ROOT}/docs/tasks/doing/{f}
   """
 })
 ```
 
 > 워커 지침은 `~/.claude/agents/kai-task-worker.md` 에서 자동 로드됨.
-> 프롬프트에는 경로 값만 전달하면 됨.
+> PROJECT_ROOT는 워커가 CLAIMED_FILE의 impact_files에서 직접 결정한다.
 
-스폰 즉시 Step 5(폴링)로 이동. 워커 반환값을 기다리지 않는다.
+모든 Agent 호출 후 즉시 Step 5(폴링)로 이동. 워커 반환값을 기다리지 않는다.
 
 ---
 
-### Step 5 — 완료 폴링
+### Step 5 — 배치 폴링
 
 ```bash
 MAX=3600; ELAPSED=0
 while true; do
-  ls "{SESSION_ROOT}/docs/tasks/done/{CLAIMED}" 2>/dev/null && STATUS="done" && break
-  ls "{SESSION_ROOT}/docs/tasks/blocked/{CLAIMED}" 2>/dev/null && STATUS="blocked" && break
+  PENDING=0
+  for f in "${CLAIMED_BATCH[@]}"; do
+    ls "{SESSION_ROOT}/docs/tasks/done/$f" 2>/dev/null && continue
+    ls "{SESSION_ROOT}/docs/tasks/blocked/$f" 2>/dev/null && continue
+    PENDING=$((PENDING + 1))
+  done
+  [ $PENDING -eq 0 ] && break   # 모두 완료
   sleep 5
   ELAPSED=$((ELAPSED + 5))
-  [ $ELAPSED -ge $MAX ] && STATUS="timeout" && break
+  [ $ELAPSED -ge $MAX ] && break  # timeout
 done
 ```
 
-timeout 시: doing/ 확인 → committed: 있으면 done/ 화해, 없으면 blocked/ 이동.
+timeout 시: 남은 doing/ 파일 각각 → committed: 있으면 done/ 화해, 없으면 blocked/ 이동.
 
 ---
 
 ### Step 6 — 완료 보고 + 아카이브 + 루프
 
+CLAIMED_BATCH의 각 task 결과를 출력:
 ```
-STATUS=done   → ✅ [{id접미}] {제목}
-STATUS=blocked → ⚠️ [{id접미}] {제목} — blocked
-STATUS=timeout → 🕐 [{id접미}] {제목} — timeout
+✅ [{id접미}] {제목}          (done/)
+⚠️ [{id접미}] {제목} — blocked  (blocked/)
+🕐 [{id접미}] {제목} — timeout  (timeout)
 ```
 
 **아카이브** (done/ > 30개 시 오래된 것부터 done/archive/ 이동):
@@ -224,6 +255,7 @@ cnt=$(ls "{SESSION_ROOT}"/docs/tasks/done/*.md 2>/dev/null | wc -l | tr -d ' ')
 
 > 이 섹션 전체가 Step 4의 `Agent({ prompt: ... })` 에 삽입된다.
 > `{{SESSION_ROOT}}` / `{{CLAIMED}}` 는 Step 4에서 이미 실제 값으로 치환됨.
+> PROJECT_ROOT는 워커가 W-0에서 impact_files 경로로 직접 결정한다 (메인 세션 전달 없음).
 
 ---
 
