@@ -67,6 +67,20 @@ allowed-tools:
 
 ---
 
+### Step 0-F — TASK_ID 사전 생성 (메인 세션 Bash 실행 · 필수)
+
+> 랜덤·타이밍 값은 LLM이 추론할 수 없으므로, **메인 세션이 직접 bash로 생성하여 서브에이전트에 전달**한다.
+
+```bash
+NS=$(date +%N 2>/dev/null); case "$NS" in ''|*[!0-9]*) NS=000000000;; esac
+TASK_ID="$(date +%Y%m%d-%H%M%S)-${NS}-$$-$(printf '%04x' $RANDOM)"
+echo "TASK_ID=$TASK_ID"
+```
+
+출력된 `TASK_ID=` 값을 Step 1 프롬프트의 `TASK_ID` 자리에 그대로 넣는다.
+
+---
+
 ### Step 1 — 등록 서브에이전트 위임 (컨텍스트 격리 · 필수)
 
 > 🧹 **컨텍스트 누적 방지**: task-add를 반복 실행하면 todo 스캔 결과·파일 탐색·advisor 응답이 메인 세션에 쌓인다.
@@ -81,6 +95,7 @@ Agent({
 
 ## 환경
 SESSION_ROOT: {SESSION_ROOT}
+TASK_ID: {Step 0-F에서 생성된 값 — 예: 20260531-154040-919185000-47878-3eed}
 
 ## 사용자 작업 설명
 {사용자 원문 그대로}
@@ -153,15 +168,25 @@ frontmatter `screen_work: true` + 본문에 `[화면 작업 필수]` 지침 추�
 최소 3개 ~ 최대 10개. Tier 1 또는 조건 미충족 시 생략.
 
 ### I. task 파일 생성 (staging → 원자적 mv)
+
+**⚠️ ID는 환경에서 제공된 TASK_ID를 사용한다. 직접 생성하거나 추론하지 않는다.**
+
+**I-a. slug 생성 (Bash 툴로 실행):**
 ```bash
-NS=$(date +%N 2>/dev/null); case "$NS" in ''|*[!0-9]*) NS=000000000;; esac
-ID="$(date +%Y%m%d-%H%M%S)-${NS}-$$-$(printf '%04x' $RANDOM)"
-slug=$(printf '%s' "{제목}" | tr '/[:space:]' '-' | tr -cd '[:alnum:]가-힣._-' | cut -c1-60)
-[ -z "$slug" ] && slug=task
-STAGE="{SESSION_ROOT}/docs/tasks/.staging/${ID}--${slug}.md"
-# STAGE에 완성된 파일 Write 후:
-mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/${ID}--${slug}.md"
+TITLE="{H단계에서 결정한 최종 제목}"
+slug=$(printf '%s' "$TITLE" | tr '/[:space:]' '-' | tr -cd '[:alnum:]가-힣._-' | cut -c1-60)
+slug=${slug#.}; [ -z "$slug" ] && slug=task
+echo "FILENAME={TASK_ID}--${slug}.md"
 ```
+Bash 출력의 `FILENAME=` 값이 최종 파일명이다. **이 값 외 다른 파일명 절대 사용 금지.**
+
+**I-b. staging Write + 원자적 mv:**
+```bash
+STAGE="{SESSION_ROOT}/docs/tasks/.staging/{FILENAME}"
+# 위 STAGE 경로에 완성된 내용 전체를 Write한 후:
+mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/{FILENAME}"
+```
+
 포맷:
 ```
 ---
@@ -386,21 +411,16 @@ done | sort -u
 ### Step 4 — task 파일 생성 (staging → 원자적 mv)
 
 > ★ **빈 파일을 먼저 만들지 않는다.** 완성본을 `.staging/` 에 쓴 뒤 원자적 `mv`로 todo/ 에 투입한다.
-> (작성 중 파일이 run에 의해 malformed claim되는 윈도우를 제거)
 
+**TASK_ID는 Step 0-F에서 메인 세션이 생성한 값을 사용한다. 서브에이전트가 새로 생성하지 않는다.**
+
+slug 생성 (Bash 툴 실행):
 ```bash
-TITLE="{한 줄 요약 제목}"
+TITLE="{최종 결정 제목}"
 slug=$(printf '%s' "$TITLE" | tr '/[:space:]' '-' | tr -cd '[:alnum:]가-힣._-' | cut -c1-60)
-slug=${slug#.}                                              # 선행 '.' 제거, 빈 slug면 'task'
-[ -z "$slug" ] && slug=task
-# ID = 정렬가능 시각 + 나노초(GNU date) + 랜덤. ★ macOS BSD date는 %N 미지원 → 감지 후 fallback
-NS=$(date +%N 2>/dev/null); case "$NS" in ''|*[!0-9]*) NS=000000000;; esac
-ID="$(date +%Y%m%d-%H%M%S)-${NS}-$$-$(printf '%04x' $RANDOM)"   # $$(pid)로 동시 add 유일성 보장
-STAGE="{SESSION_ROOT}/docs/tasks/.staging/${ID}--${slug}.md"
+slug=${slug#.}; [ -z "$slug" ] && slug=task
+echo "FILENAME={TASK_ID}--${slug}.md"
 ```
-
-> ★ `%N` 미지원 환경에선 나노초가 `000000000` 으로 고정되어 동일초 FIFO 해상도가 떨어지지만,
-> `$$`(프로세스 pid) + `$RANDOM` 이 **서로 다른 세션 간 유일성**을 보장한다(동시 add 충돌 불가).
 
 `.staging/` 에 아래 **완성된 내용 전체**를 Write한 다음, 원자적으로 이동한다:
 
@@ -435,7 +455,8 @@ committed:        # 커밋 성공 시 task-run이 해시 기록 (완료-고아 �
 ```
 
 ```bash
-mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/${ID}--${slug}.md"
+STAGE="{SESSION_ROOT}/docs/tasks/.staging/{FILENAME}"
+mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/{FILENAME}"
 ```
 
 **frontmatter 규칙:**
@@ -459,6 +480,8 @@ mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/${ID}--${slug}.md"
 - ❌ **todo 스캔·파일 탐색·advisor 호출을 메인 세션에서 직접 실행** — Step 1 Agent 서브에이전트에 위임 (컨텍스트 누적 방지)
 - ❌ task 파일을 `done/` 등 todo/ 외 디렉터리에 생성
 - ❌ **빈 파일 선생성**(noclobber 등) — 반드시 staging 완성본 → 원자적 mv
+- ❌ **TASK_ID를 서브에이전트가 직접 생성** — Step 0-F 메인 세션 bash 출력값만 사용
+- ❌ **`--{slug}` 구분자 생략** — slug 없어도 `--task` 필수 (`{ID}.md` 형식 금지)
 - ❌ **병합 시 Write로 todo 파일 재생성** — Edit-only, 실패 시 신규파일 fallback
 - ❌ **영향 파일(impact_files) 없이 생성** (충돌 검사 무력화)
 - ❌ frontmatter에 `status` 필드 추가 (디렉터리가 권위 — drift 유발)
