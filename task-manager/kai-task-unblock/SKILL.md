@@ -1,15 +1,17 @@
 ---
 name: kai-task-unblock
 description: |
-  blocked/ 의 작업을 분석하여 해결 방법을 안내하고,
-  자동 해결 가능한 경우 todo/ 로 즉시 복귀시킨다.
-  해결 불가한 경우 정확한 원인과 조치 방법을 설명한다.
+  blocked/ 의 작업을 분석하여 자동 복귀 또는 advisor 자문으로 재설정한다.
+  단순 문제 → 즉시 todo/ 복귀.
+  복잡한 문제(시점불일치·완전불가·빌드실패) → advisor 호출 후 구현 방안 재설정 → todo/ 복귀.
+  커밋실패 등 인프라 문제 → 해결 방법 안내.
   트리거: /kai-task-unblock
 allowed-tools:
   - Read
   - Edit
   - Bash
   - Grep
+  - Agent
 ---
 
 # kai-task-unblock — blocked 작업 진단 + 복귀
@@ -69,7 +71,7 @@ ls "{SESSION_ROOT}/docs/tasks/blocked/"*.md 2>/dev/null
 
 ---
 
-### Step 3 — 자동 복귀 처리
+### Step 3 — 🟢 자동 복귀 처리
 
 **Step 2에서 🟢 판정된 작업:**
 
@@ -92,6 +94,51 @@ mv "{SESSION_ROOT}/docs/tasks/blocked/{f}" "{SESSION_ROOT}/docs/tasks/todo/{f}"
 
 ---
 
+### Step 3-A — 🔴 복잡한 작업 advisor 자문 + 재설정
+
+**Step 2에서 🔴 판정된 작업 중 아래에 해당하면 advisor 호출:**
+
+| 사유 | advisor 호출 여부 |
+|---|---|
+| `BLOCKED: 시점불일치` | ✅ 호출 — 현재 파일 상태 기반 새 구현 방안 필요 |
+| `BLOCKED: 완전불가` | ✅ 호출 — 새 접근법 도출 필요 |
+| `BLOCKED: 빌드실패` | ✅ 호출 — 자체 수정 3회 실패 = 설계 문제 가능성 |
+| `BLOCKED: 커밋실패` | ❌ 생략 — git/인프라 문제, advisor 불필요 |
+| 기타/불명 | ✅ 호출 — 원인 파악부터 필요 |
+
+**advisor 호출:**
+
+```
+Agent({
+  subagent_type: "advisor",
+  prompt: """
+작업 파일: {CLAIMED_FILE 전체 내용}
+blocked 사유: {frontmatter 또는 본문의 BLOCKED: 메시지}
+
+요청:
+1. blocked 원인 분석
+2. 수정된 impact_files (현재 파일 실제 상태 기반)
+3. 새로운 구현 방안 (기존 방안의 문제점 해소)
+4. 주의해야 할 엣지케이스
+"""
+})
+```
+
+**advisor 응답 수신 후 task 파일 업데이트 (Edit):**
+1. frontmatter `impact_files` 갱신
+2. frontmatter `advisor: done` 기록
+3. 본문에 `## 재설정 구현 방안 (advisor)\n{advisor 응답}` 추가
+4. blocked 사유 주석으로 보존: `<!-- BLOCKED 이력: {사유} -->`
+
+**todo/ 로 복귀:**
+```bash
+mv "{SESSION_ROOT}/docs/tasks/blocked/{f}" "{SESSION_ROOT}/docs/tasks/todo/{f}"
+```
+
+> `BLOCKED: 커밋실패` 는 advisor 없이 Step 4 수동 안내로만 처리.
+
+---
+
 ### Step 4 — 결과 보고
 
 아래 형식으로 출력:
@@ -99,24 +146,24 @@ mv "{SESSION_ROOT}/docs/tasks/blocked/{f}" "{SESSION_ROOT}/docs/tasks/todo/{f}"
 ```
 📋 blocked/ 진단 결과 ({N}건)
 
-✅ 자동 복귀 완료:
+✅ 자동 복귀:
   - [{id접미}] {제목} → todo/ (사유: impact_files 추가)
   - [{id접미}] {제목} → done/ (사유: committed: 마커 발견)
 
-🔧 수동 처리 필요:
+🤖 advisor 재설정 후 복귀:
+  - [{id접미}] {제목} → todo/ (advisor 새 구현 방안 설정 완료)
+
+🔧 수동 처리 필요 (커밋실패 등 인프라 문제):
   ─────────────────────────────────
   [{id접미}] {제목}
-  원인: BLOCKED: 빌드실패
-  
+  원인: BLOCKED: 커밋실패
+
   해결 방법:
-  1. {구체적 파일명}:{줄번호} 에서 {오류 내용} 수정
-  2. 수정 후 아래 명령으로 todo 복귀:
+  1. {구체적 원인 안내}
+  2. 해결 후 아래 명령으로 todo 복귀:
      mv "{경로}/blocked/{파일명}" "{경로}/todo/{파일명}"
   3. /kai-task-run 으로 재실행
   ─────────────────────────────────
-  [{id접미}] {제목}
-  원인: {사유}
-  ...
 ```
 
 ---
