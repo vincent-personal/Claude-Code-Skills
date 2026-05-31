@@ -115,6 +115,16 @@ done
 ### E. 작업 분할 판단
 아래 중 하나라도 해당하면 여러 task 파일로 분할:
 - 독립 기능 2개 이상 혼재 / 레이어 혼재(백엔드+프론트+DB) / 영향 파일 8개 이상 / 순차 의존성 명확
+- **다중 git 저장소 혼재** — impact_files가 서로 다른 git 저장소에 걸치면 **저장소 1개 = task 1개**로 반드시 분할
+
+저장소 감지:
+```bash
+for f in {impact_files}; do
+  git -C "$(dirname "$f")" rev-parse --show-toplevel 2>/dev/null
+done | sort -u
+```
+출력 줄 수 > 1 이면 다중 저장소 → 분할 필수.
+
 분할 시 후행 작업 frontmatter의 `predecessors:`에 선행 id 기재.
 
 ### F. 영향 파일 식별 + Tier 판단
@@ -263,14 +273,26 @@ todo/ 항목 중 새 작업과 **동일 파일·동일 컴포넌트·동일 기�
 
 | 조건 | 설명 |
 |---|---|
+| **다중 git 저장소** | impact_files가 서로 다른 git 저장소에 걸침 → **저장소 1개 = task 1개** (최우선 분할 조건) |
 | 독립 기능 혼재 | "그리고/또한/추가로" 로 연결된 **서로 독립적인 기능** 2개 이상 |
 | 레이어 혼재 | 백엔드 API + 프론트 UI + DB 스키마 등 **서로 다른 레이어** 동시 |
 | 영향 파일 과다 | 영향 파일 **8개 이상**으로 추정 + 논리적으로 안 묶이는 파일 포함 |
 | 단계 의존성 명확 | "A 완료 후 B" 라는 **순차 의존** 구조 |
 
+**다중 git 저장소 감지:**
+```bash
+for f in {impact_files 목록}; do
+  git -C "$(dirname "$f")" rev-parse --show-toplevel 2>/dev/null
+done | sort -u
+# 출력 줄 수 > 1 → 다중 저장소 → 분할 필수
+```
+
 **분할 원칙:** 각 하위 작업은 독립적으로 완료·빌드 가능. 분할 수는 최소화(자연스러운 경계에서만).
 순차 의존이 있으면 후행 작업 frontmatter의 `predecessors:` 에 **선행 작업의 id**를 기재한다.
 (task-run은 predecessors가 모두 done/ 에 있어야 후행을 착수한다.)
+
+> 예시: `verida_api` DB 마이그레이션 → `verida-shared-model` 모델 업데이트 → `verida-order` npm update
+> → task 3개, predecessors 체인으로 순서 보장.
 
 ---
 
@@ -442,6 +464,7 @@ mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/${ID}--${slug}.md"
 - ❌ frontmatter에 `status` 필드 추가 (디렉터리가 권위 — drift 유발)
 - ❌ 세부 내용 없이 제목만 생성
 - ❌ `git worktree add` / `cp` / `rsync`
+- ❌ **단일 task에 복수 git 저장소 혼재** — 반드시 저장소별 task로 분할 (워커는 단일 저장소만 처리)
 
 ---
 
