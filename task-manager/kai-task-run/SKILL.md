@@ -82,7 +82,7 @@ allowed-tools:
 mkdir -p "{SESSION_ROOT}/docs/tasks"/{todo,doing,done,blocked,.staging,.plans}
 ```
 
-> `.plans/` — 워커가 tier≥2 task의 Codex 병렬 플랜(`*.codex.md`)을 임시 저장하는 공간 (codex 가용 시에만). 완료 시 W-4에서 플랜을 done task 본문에 첨부하고 원본은 삭제 → `.plans/`는 비워지며, 잔여물은 다음 run 시작 시 60분 GC.
+> `.plans/` — tier≥2 task의 Codex 병렬 플랜(`*.codex.md`)을 임시 저장하는 공간 (메인 Step 4-A가 생성, codex 가용 시에만). 완료 시 메인 Step 6-A가 플랜을 done task 본문에 첨부하고 원본은 삭제 → `.plans/`는 비워지며, 잔여물은 다음 run 시작 시 60분 GC.
 
 ---
 
