@@ -31,10 +31,10 @@ PROJECT_ROOT=$(cd "$(dirname "$FIRST_FILE")" && git rev-parse --show-toplevel 2>
 
 ## W-0.5 — Codex 플랜은 **메인 세션이 띄우고 완료까지 대기**한다 (워커는 안 띄움/안 기다림)
 
-> tier≥2 + codex 가용 시, **메인 세션(Step 4-A)** 이 `codex-plan.sh` 를 띄우고 `wait` 로 **codex 완료까지 블록**한 뒤
+> tier≥2 + codex 가용 시, **메인 세션(Step 2)** 이 `codex-plan.sh` 를 띄우고 `wait` 로 **codex 완료까지 블록**한 뒤
 > 워커를 스폰한다. 즉 **워커가 시작될 땐 `{SESSION_ROOT}/docs/tasks/.plans/{CLAIMED}.codex.md` 가 이미 있다**(성공 시).
 > **워커는 launch도 대기도 하지 않는다** — W-1에서 그 결과 파일을 *참조만* 한다.
-> (launch·대기를 워커에 두면 AI가 부가단계로 보고 건너뛰므로 결정론적 메인 루프로 이관함. 기록도 메인 Step 6가 담당.)
+> (launch·대기를 워커에 두면 AI가 부가단계로 보고 건너뛰므로 결정론적 메인 루프로 이관함. 기록도 메인 Step 5가 담당.)
 
 ---
 
@@ -54,17 +54,17 @@ PROJECT_ROOT=$(cd "$(dirname "$FIRST_FILE")" && git rev-parse --show-toplevel 2>
    - ③ 현재 구현이 템플릿과 어긋나면 **"보존"이 아니라 템플릿 기준으로 전면 재현(불일치 시 재작성)** 한다. 화면 작업(`screen_work`)이면 W-2 이후 Playwright로 템플릿 대비 검증한다.
 
 3. **자체 구현 방안 수립** — 위 Read 결과를 근거로 *먼저 너의 플랜을 독립적으로* 정한다.
-   (Codex 플랜을 보기 전에 수립 — 앵커링 방지)
+   (Codex 리스크 분석을 보기 전에 수립 — 앵커링 방지)
 
-3.5. **Codex 플랜 종합** — **대기하지 마라.** 메인 세션(Step 4-A)이 codex 완료까지 `wait`로 블록한 뒤 너를 스폰했으므로, 플랜이 있으면 이미 디스크에 있다. 곧장 1회 확인한다:
+3.5. **Codex 리스크 분석 종합** — **대기하지 마라.** 메인 세션(Step 2)이 codex 완료까지 `wait`로 블록한 뒤 너를 스폰했으므로, 결과가 있으면 이미 디스크에 있다. 곧장 1회 확인한다:
    ```bash
    PLAN="{SESSION_ROOT}/docs/tasks/.plans/{CLAIMED}.codex.md"
    [ -f "$PLAN" ] && echo EXISTS || echo NONE
    ```
-   - **EXISTS** → Read → 너의 자체 플랜(step 3)과 비교·종합. Codex가 짚은 유효한 지적(놓친 엣지케이스·더 나은 접근)은 반영하되, **실제 코드·프로젝트 컨벤션과 모순되거나 오탐인 부분은 무시**한다. **최종 판단은 너(Claude)**.
+   - **EXISTS** → Read. codex 는 '2차 구현안'이 아니라 **적대적 리뷰어**로서 이 task의 치명적 위험·놓치기 쉬운 엣지케이스·완전히 다른 접근·검증 포인트를 짚는다. 이것을 너의 자체 플랜(step 3)과 **대조하여 네가 놓친 맹점을 메운다.** 유효한 지적은 반영하되, **실제 코드·프로젝트 컨벤션과 모순되거나 오탐인 부분은 무시**한다. **최종 판단은 너(Claude)**.
    - **NONE** → (저tier/codex 미사용/실패) 자체 플랜으로 진행. 막지 않는다.
    - ❗ `sleep`/대기 루프 금지 — 메인이 이미 기다렸다. 단순 존재확인 후 즉시 진행.
-   - ※ `.plans/` 파일 첨부·삭제는 메인 Step 6가 한다 — 건드리지 않는다.
+   - ※ `.plans/` 파일 첨부·삭제는 메인 Step 5가 한다 — 건드리지 않는다.
 
 4. 새 파일 생성 시 impact_files에 append(Edit)
 
@@ -152,7 +152,7 @@ HASH=$(cd {PROJECT_ROOT} && git rev-parse --short HEAD)
 
 1. CLAIMED_FILE frontmatter에 `committed: {HASH}` 추가 (Edit)
 2. CLAIMED_FILE 본문 끝에 완료 기록 추가
-   ※ Codex 플랜의 done 첨부·`.plans/` 정리는 **메인 세션(Step 6)** 이 담당 — 워커는 건드리지 않는다.
+   ※ Codex 플랜의 done 첨부·`.plans/` 정리는 **메인 세션(Step 5)** 이 담당 — 워커는 건드리지 않는다.
 3. mv doing → done:
 ```bash
 mv "{CLAIMED_FILE}" "{SESSION_ROOT}/docs/tasks/done/$(basename {CLAIMED_FILE})"
@@ -171,8 +171,8 @@ mv "{CLAIMED_FILE}" "{SESSION_ROOT}/docs/tasks/done/$(basename {CLAIMED_FILE})"
 - ❌ doing/ 에 작업 남긴 채 종료 — 반드시 done/ 또는 blocked/
 - ❌ `git worktree add` / PROJECT_ROOT 외부 파일 수정
 - ❌ build.lock 무시하고 동시 빌드
-- ❌ 워커가 `codex-plan.sh` 를 직접 띄움 — launch는 **메인 세션(Step 4-A)** 담당. 워커는 W-1에서 참조만.
-- ❌ 워커가 codex 완료를 `sleep`/폴링 대기 — 대기는 메인 Step 4-A가 `wait`로 끝냄. 워커는 `.codex.md` **존재확인 1회 후 즉시** 진행 (있으면 종합, 없으면 자체)
+- ❌ 워커가 `codex-plan.sh` 를 직접 띄움 — launch는 **메인 세션(Step 2)** 담당. 워커는 W-1에서 참조만.
+- ❌ 워커가 codex 완료를 `sleep`/폴링 대기 — 대기는 메인 Step 2가 `wait`로 끝냄. 워커는 `.codex.md` **존재확인 1회 후 즉시** 진행 (있으면 종합, 없으면 자체)
 - ❌ Codex 플랜을 검증 없이 그대로 따름 — 코드·컨벤션 기준 최종 판단은 워커(Claude)
-- ❌ 워커가 `.plans/` 파일을 첨부·삭제 — done 첨부·정리는 **메인 세션(Step 6)** 담당
+- ❌ 워커가 `.plans/` 파일을 첨부·삭제 — done 첨부·정리는 **메인 세션(Step 5)** 담당
 - ❌ `.plans/` 산출물을 커밋에 포함 — `git add`는 impact_files만
