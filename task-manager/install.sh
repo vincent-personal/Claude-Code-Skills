@@ -62,7 +62,20 @@ for agent in advisor.md kai-task-worker.md; do
   fi
 done
 
-# 3) settings.json 권한 패치 — 워커 에이전트가 멈추지 않도록 필요한 Bash 패턴 추가
+# 3) 헬퍼 툴 설치 (~/.claude/tools/ — 심볼릭 링크)
+TARGET_TOOLS_DIR="$HOME/.claude/tools"
+mkdir -p "$TARGET_TOOLS_DIR"
+for tool in codex-plan.sh; do
+  SRC="$SKILLS_DIR/tools/$tool"
+  DST="$TARGET_TOOLS_DIR/$tool"
+  if [ -f "$SRC" ]; then
+    ln -sf "$SRC" "$DST"
+    chmod +x "$SRC"
+    echo "✓ 툴 $tool → $DST"
+  fi
+done
+
+# 4) settings.json 권한 패치 — 워커 에이전트가 멈추지 않도록 필요한 Bash 패턴 추가
 SETTINGS="$HOME/.claude/settings.json"
 echo "🔐 settings.json Bash 권한 패치..."
 
@@ -136,6 +149,9 @@ if [ -f "$SETTINGS" ]; then
     # npm 추가
     "Bash(npm install:*)"
     "Bash(npx:*)"
+    # codex CLI
+    "Bash(codex:*)"
+    "Bash(codex exec:*)"
   )
 
   for pattern in "${PATTERNS[@]}"; do
