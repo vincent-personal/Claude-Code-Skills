@@ -33,17 +33,17 @@ allowed-tools:
 ```
 메인 세션 (얇은 루프 · 컨텍스트 최소)
   ┌─ Step 0-A: 잠금확인 + 좀비복구 + todo확인 [단일 Bash]  ← 루프 시작점
-  │  Step 2:   충돌없는 배치 선점 (impact_files 교집합 없는 task 묶음 → mv claim)
-  │  Step 4:   (tier≥2+codex) Codex 플랜 생성·완료까지 wait → 배치 병렬 스폰  ※codex 있을 때만
-  │  Step 5:   배치 폴링 (모든 워커 done/blocked 감지까지 대기)
-  └─ Step 6:   Codex 플랜 done task 첨부 + 완료 보고 → Step 0-A로 루프
+  │  Step 2:   배치 선점 + (tier≥2+codex) Codex 리스크분석 launch+wait  [한 Bash · codex 없으면 자동skip]
+  │  Step 4:   배치 병렬 스폰
+  │  Step 5:   배치 폴링 + (종료 직후) Codex 분석 done 첨부·정리  [한 Bash]
+  └─ Step 6:   완료 보고 + 아카이브 → Step 0-A로 루프
 
 백그라운드 워커 (작업 1개 완수 후 조용히 종료)
   W-0:   작업 파일 Read + PROJECT_ROOT 결정
   W-1:   컨벤션 Read + 자체 플랜 + (메인이 띄운)Codex 플랜 참조·종합 + 코드 구현
   W-2:   빌드 검증
   W-3:   git add → pull --rebase → commit → push
-  W-4:   committed: 마커 + mv doing→done   (Codex 플랜 첨부는 메인 Step 6)
+  W-4:   committed: 마커 + mv doing→done   (Codex 분석 첨부는 메인 Step 5)
   ※ Agent() 재호출 없음 — 체인 없음 (codex는 CLI라 Bash 호출 = 체인 아님)
 ```
 
@@ -82,7 +82,7 @@ allowed-tools:
 mkdir -p "{SESSION_ROOT}/docs/tasks"/{todo,doing,done,blocked,.staging,.plans}
 ```
 
-> `.plans/` — tier≥2 task의 Codex 병렬 플랜(`*.codex.md`)을 임시 저장하는 공간 (메인 Step 4-A가 생성, codex 가용 시에만). 완료 시 메인 Step 6-A가 플랜을 done task 본문에 첨부하고 원본은 삭제 → `.plans/`는 비워지며, 잔여물은 다음 run 시작 시 60분 GC.
+> `.plans/` — tier≥2 task의 Codex 리스크분석(`*.codex.md`)을 임시 저장하는 공간 (Step 2 선점 Bash가 생성, codex 가용 시에만). 워커 구현 후 Step 5(폴링 종료 직후)가 분석을 done task 본문에 첨부하고 원본은 삭제 → `.plans/`는 비워지며, 잔여물은 다음 run 시작 시 60분 GC.
 
 ---
 
@@ -128,124 +128,32 @@ echo "remaining=$remaining"
 
 ---
 
-### Step 2 — 충돌없는 배치 선정 + 원자 선점
+### Step 2 — 배치 선점 + Codex 리스크 분석
 
-**최대 동시 워커 수: 5개** (git push race 방지)
+> **모든 로직은 `task-claim-and-plan.sh` 가 수행한다** — FIFO 선정·mv 선점·Codex launch+wait 를 하나의 실행 파일에 담아, LLM이 단계를 쪼개거나 건너뛸 수 없게 한다.
+> `task-claim-and-plan.sh` 미설치 시 `[ -x ]` 가 false → 전체 skip (원래 동작).
+>
+> ⚠️ **이 Bash 호출은 `timeout: 600000`(10분) 으로 실행한다** — Codex 가 수십 초~수 분 걸릴 수 있어 기본 2분에 끊기지 않게 한다.
 
-**준비 — 기존 doing/ 파일 잠금 목록 구성:**
 ```bash
-done_ids=$(ls "{SESSION_ROOT}"/docs/tasks/done/ 2>/dev/null | sed 's/--.*//')
-locked_files=""
-for df in "{SESSION_ROOT}"/docs/tasks/doing/*.md; do
-  [ -e "$df" ] || continue
-  files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$df")
-  locked_files="$locked_files $files"
-done
-BATCH=()        # 이번 루프에서 선점할 task 파일명 배열
-batch_files=""  # BATCH에 포함된 task들의 impact_files 누적 (배치 내 충돌 방지용)
+output=$(bash "$HOME/.claude/tools/task-claim-and-plan.sh" "{SESSION_ROOT}" 5)
+echo "$output"
 ```
 
-**todo/ FIFO 순회 — 배치 구성:**
-
-각 후보 `f` 에 대해 순서대로:
-
-**① 선행조건** — `predecessors` 의 모든 id가 `done_ids` 에 있어야 함. 아니면 skip.
-
-**② impact_files 추출:**
-```bash
-candidate_files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "{SESSION_ROOT}/docs/tasks/todo/$f")
-[ -z "$candidate_files" ] && mv "{SESSION_ROOT}/docs/tasks/todo/$f" "{SESSION_ROOT}/docs/tasks/blocked/$f" && continue
-```
-
-**③ 충돌 검사 — locked_files + batch_files 모두와 교집합 확인:**
-```bash
-overlap=0
-for cf in $candidate_files; do
-  echo "$locked_files $batch_files" | grep -qF "$cf" && overlap=1 && break
-done
-[ $overlap -eq 1 ] && continue  # 이번 배치에서 제외 (다음 루프에서 처리)
-```
-
-**④ 배치 추가:**
-```bash
-BATCH+=("$f")
-batch_files="$batch_files $candidate_files"
-[ ${#BATCH[@]} -ge 5 ] && break  # 최대 5개
-```
-
-**배치 전체 원자 선점:**
-```bash
-CLAIMED_BATCH=()
-for f in "${BATCH[@]}"; do
-  mv "{SESSION_ROOT}/docs/tasks/todo/$f" "{SESSION_ROOT}/docs/tasks/doing/$f" 2>/dev/null && CLAIMED_BATCH+=("$f")
-done
-```
+`output` 파싱:
+- `NONE` → **"착수 가능한 작업 없음."** 출력 후 **종료**
+- `CLAIMED:<f>` 줄 → `CLAIMED_BATCH` 배열에 추가 (`f` = 파일명)
+- `CODEX:<n>` → 로그 출력 (`n`건 Codex 완료)
 
 선점 성공한 각 파일에 frontmatter `claimed_at` / `claimed_by` 기록(Edit).
 
-`${#CLAIMED_BATCH[@]} -eq 0` → "착수 가능한 작업 없음." 출력 후 **종료**.
-
 ---
 
 ---
 
-### Step 4 — Codex 플랜 launch + 배치 병렬 스폰
+### Step 4 — 배치 병렬 스폰
 
-#### 4-A. Codex 병렬 플랜 생성 — **메인 세션이 띄우고, 완료될 때까지 블록 대기** (tier≥2 + codex 가용 시)
-
-> launch도 대기도 **워커가 아니라 메인 세션**이 한다 (워커는 둘 다 건너뛰는 게 실측됨).
-> 고정 시간(90초 등) 추측이 아니라, **bash `wait` 로 codex가 실제로 끝날 때까지 블록**한다. 배치 내 tier≥2 task들의 codex는 병렬로 돌고, `wait` 가 전부 끝나야 다음(워커 스폰)으로 간다.
-> codex 미가용/저tier면 아무 것도 안 띄움 = 원래 동작.
->
-> ⚠️ **이 Bash 호출은 `timeout: 600000`(10분) 으로 실행한다** — codex 플랜이 수십 초~수 분 걸릴 수 있으므로 기본 2분 타임아웃에 끊기지 않게 한다. (안전 상한일 뿐, 보통은 codex 완료 즉시 반환)
-
-```bash
-HELPER="$HOME/.claude/tools/codex-plan.sh"
-PLANDIR="{SESSION_ROOT}/docs/tasks/.plans"; mkdir -p "$PLANDIR"
-# 상대 impact_file → 실재 절대경로 (SESSION_ROOT / 그 부모 / cwd 순으로 탐색)
-resolve_abs() {
-  rel="$1"
-  case "$rel" in /*) [ -e "$rel" ] && { printf '%s' "$rel"; return; };; esac
-  for b in "{SESSION_ROOT}" "$(dirname "{SESSION_ROOT}")" "$(pwd)"; do
-    [ -e "$b/$rel" ] && { printf '%s' "$b/$rel"; return; }
-  done
-}
-PIDS=()
-if [ -x "$HELPER" ]; then
-  for f in "${CLAIMED_BATCH[@]}"; do
-    tf="{SESSION_ROOT}/docs/tasks/doing/$f"
-    tier=$(awk -F: '/^tier:/{gsub(/ /,"",$2);print $2;exit}' "$tf")
-    [ "${tier:-1}" -ge 2 ] 2>/dev/null || continue          # tier≥2만
-    # impact_files 절대경로화 + PROJECT_ROOT 결정
-    abs=""; first=""
-    while IFS= read -r rel; do
-      a=$(resolve_abs "$rel"); [ -z "$a" ] && continue
-      [ -z "$first" ] && first="$a"
-      abs="$abs$a"$'\n'
-    done < <(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
-    [ -z "$first" ] && continue
-    ROOT=$(cd "$(dirname "$first")" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null); [ -z "$ROOT" ] && continue
-    # 프롬프트 = 지침 헤더 + task 본문(frontmatter 제외) + 절대경로 파일목록
-    PF="$PLANDIR/$f.prompt.txt"
-    {
-      echo "너는 시니어 엔지니어다. 아래 task의 구현 방안을 한국어로 설계하라."
-      echo "코드를 수정하지 말고, 필요하면 아래 명시된 파일만 읽어 현재 상태를 확인한 뒤, 파일별 구체적 수정 단계·주의점·엣지케이스를 간결히 제시하라. 곧바로 플랜만 작성하고 끝내라."
-      echo
-      awk 'BEGIN{c=0}/^---$/{c++;next} c>=2{print}' "$tf"     # frontmatter 이후 본문
-      echo; echo "[관련 파일]"; printf '%s' "$abs"
-    } > "$PF"
-    "$HELPER" "$ROOT" "$PF" "$PLANDIR/$f.codex.md" >/dev/null 2>&1 &   # 병렬 launch
-    PIDS+=($!)
-  done
-  # ★ 핵심: 띄운 codex 전부 끝날 때까지 블록 (고정 시간 추측 아님 — 완료 이벤트 대기)
-  [ ${#PIDS[@]} -gt 0 ] && wait "${PIDS[@]}"
-  echo "codex 플랜 완료: $(ls "$PLANDIR"/*.codex.md 2>/dev/null | wc -l | tr -d ' ')건"
-fi
-```
-
-이 블록이 **반환된 시점 = 모든 codex 플랜이 이미 디스크에 있는 시점**. 이제 워커를 스폰하면 워커는 대기 없이 바로 읽는다.
-
-#### 4-B. 배치 병렬 스폰
+> **Codex 리스크 분석은 Step 2(`task-claim-and-plan.sh`)가 이미 완료했다.** 워커 스폰 시점엔 `.plans/{f}.codex.md` 가 (codex 가용·tier≥2 시) 이미 디스크에 있다. 여기서는 워커만 띄운다. (codex 미설치·저tier면 `.codex.md` 가 없을 뿐, 워커는 정상 진행)
 
 `CLAIMED_BATCH`의 각 task에 대해 **하나의 응답에서 Agent를 동시 호출**한다:
 
@@ -263,58 +171,33 @@ CLAIMED_FILE: {SESSION_ROOT}/docs/tasks/doing/{f}
 
 > 워커 지침은 `~/.claude/agents/kai-task-worker.md` 에서 자동 로드됨.
 > PROJECT_ROOT는 워커가 CLAIMED_FILE의 impact_files에서 직접 결정한다.
-> Codex 플랜(4-A에서 띄움)은 워커 W-1이 `.plans/{f}.codex.md` 로 참조한다 (병렬 생성 중).
+> Codex 리스크분석(Step 2 선점 Bash에서 띄움·대기 완료)은 워커 W-1이 `.plans/{f}.codex.md` 로 참조한다.
 
 모든 Agent 호출 후 즉시 Step 5(폴링)로 이동. 워커 반환값을 기다리지 않는다.
 
 ---
 
-### Step 5 — 배치 폴링
+### Step 5 — 배치 폴링 + Codex 첨부
+
+> **폴링·timeout 처리·Codex 첨부 모두 `task-poll-and-attach.sh` 가 수행한다** — 폴링 종료 직후 첨부까지 한 실행 파일에서 처리하므로, 첨부 단계를 건너뛸 수 없다.
+>
+> ⚠️ **이 Bash 호출은 `timeout: 3660000`(61분) 으로 실행한다** — 폴링 MAX(3600초) + 여유 시간.
 
 ```bash
-MAX=3600; ELAPSED=0
-while true; do
-  PENDING=0
-  for f in "${CLAIMED_BATCH[@]}"; do
-    ls "{SESSION_ROOT}/docs/tasks/done/$f" 2>/dev/null && continue
-    ls "{SESSION_ROOT}/docs/tasks/blocked/$f" 2>/dev/null && continue
-    PENDING=$((PENDING + 1))
-  done
-  [ $PENDING -eq 0 ] && break   # 모두 완료
-  sleep 5
-  ELAPSED=$((ELAPSED + 5))
-  [ $ELAPSED -ge $MAX ] && break  # timeout
-done
+output=$(bash "$HOME/.claude/tools/task-poll-and-attach.sh" "{SESSION_ROOT}" "${CLAIMED_BATCH[@]}")
+echo "$output"
 ```
 
-timeout 시: 남은 doing/ 파일 각각 → committed: 있으면 done/ 화해, 없으면 blocked/ 이동.
+`output` 파싱 (Step 6 보고용):
+- `DONE:<f>` / `BLOCKED:<f>` / `TIMEOUT:<f>`
+
+> blocked/timeout task의 `.codex.md` 는 스크립트가 done 확인 후 남겨 둠 → 다음 시도 재사용 또는 Step 0-A 60분 GC로 정리.
 
 ---
 
-### Step 6 — Codex 플랜 첨부 + 완료 보고 + 아카이브 + 루프
+### Step 6 — 완료 보고 + 아카이브 + 루프
 
-#### 6-A. Codex 플랜 → done task 첨부 (메인 세션이 보장) — done 으로 간 task만
-
-```bash
-PLANDIR="{SESSION_ROOT}/docs/tasks/.plans"
-for f in "${CLAIMED_BATCH[@]}"; do
-  plan="$PLANDIR/$f.codex.md"
-  dt="{SESSION_ROOT}/docs/tasks/done/$f"
-  [ -f "$plan" ] && [ -f "$dt" ] || continue      # 플랜 있고 done으로 간 것만
-  {
-    echo; echo "## Codex 플랜 (참고)"
-    echo "> Codex가 독립 생성한 2차 의견. 실제 구현은 워커(Claude)가 종합·최종판단한 결과이므로 이와 다를 수 있다."
-    echo
-    cat "$plan"
-  } >> "$dt"
-  # 정리: rm 대신 PLANDIR로 범위 고정한 find -delete (위험한-rm 분류기 회피 → 권한 프롬프트 없음)
-  [ -n "$PLANDIR" ] && find "$PLANDIR" -maxdepth 1 -type f \( -name "$f.codex.md" -o -name "$f.prompt.txt" \) -delete 2>/dev/null
-done
-```
-
-> blocked/timeout 으로 빠진 task의 `.codex.md` 는 남겨둔다 → 다음 시도 때 재사용되거나 Step 0-A의 60분 GC로 정리.
-
-#### 6-B. 완료 보고
+### Step 6 — 완료 보고
 
 CLAIMED_BATCH의 각 task 결과를 출력:
 ```
@@ -367,9 +250,9 @@ PROJECT_ROOT=$(cd "$(dirname "$FIRST_FILE")" && git rev-parse --show-toplevel 2>
 
 ---
 
-### W-0.5 — Codex 플랜은 **메인 세션(Step 4-A)이 띄운다** (워커는 안 띄움)
+### W-0.5 — Codex 플랜은 **메인 세션(Step 2)이 띄운다** (워커는 안 띄움)
 
-워커는 Codex 플랜을 **띄우지 않는다**. tier≥2+codex 가용 시 메인 세션이 Step 4-A에서 백그라운드로 띄워 `docs/tasks/.plans/{{CLAIMED}}.codex.md` 를 생성하고, 첨부·정리는 Step 6-A가 한다. 워커는 W-1에서 그 파일을 **참조만** 한다.
+워커는 Codex 플랜을 **띄우지 않는다**. tier≥2+codex 가용 시 메인 세션이 Step 2에서 백그라운드로 띄워 `docs/tasks/.plans/{{CLAIMED}}.codex.md` 를 생성하고, 첨부·정리는 Step 5가 한다. 워커는 W-1에서 그 파일을 **참조만** 한다.
 > **권위 정의는 `~/.claude/agents/kai-task-worker.md` 의 W-1(3·3.5)** 를 따른다 (~90초 대기·종합 규칙). 상충 시 에이전트 파일 우선.
 
 ---
