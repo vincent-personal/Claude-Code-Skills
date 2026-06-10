@@ -47,13 +47,13 @@ for f in "${CLAIMED_BATCH[@]}"; do
 done
 
 # Codex 리스크 분석 → done task 본문에 첨부 + .plans 임시파일 정리
-# done task: codex 성공 시 첨부, 실패해도 prompt.txt/codex.md 항상 정리
-# blocked/timeout task: 두 파일 보존 (다음 시도 재사용 또는 Step 0-A 60분 GC)
+# done/blocked/timeout 모든 종료 상태에서 임시파일 정리
+# (blocked 재시도 시 task-claim-and-plan.sh 가 새로 생성하므로 보존 불필요)
 for f in "${CLAIMED_BATCH[@]}"; do
   plan="$PLANDIR/$f.codex.md"
   dt="$DONE/$f"
-  [ -f "$dt" ] || continue   # done 아니면 보존 (blocked/timeout 재시도용)
-  if [ -f "$plan" ]; then
+  # done task이고 codex 성공했으면 본문에 첨부
+  if [ -f "$dt" ] && [ -f "$plan" ]; then
     {
       echo
       echo "## Codex 리스크 분석 (참고)"
@@ -62,7 +62,7 @@ for f in "${CLAIMED_BATCH[@]}"; do
       cat "$plan"
     } >> "$dt"
   fi
-  # done task는 codex 성공/실패 무관하게 임시파일 항상 정리
+  # 종료 상태(done/blocked/timeout) 무관하게 임시파일 항상 정리
   find "$PLANDIR" -maxdepth 1 -type f \( -name "$f.codex.md" -o -name "$f.prompt.txt" \) -delete 2>/dev/null || true
 done
 
