@@ -107,7 +107,10 @@ if ls "{SESSION_ROOT}"/docs/tasks/doing/*.md 2>/dev/null | grep -q .; then
   for f in "{SESSION_ROOT}"/docs/tasks/doing/*.md; do
     [ -e "$f" ] || continue
     if awk '/^---$/{c++; next} c==1 && /^committed:[[:space:]]*[0-9a-f]/{found=1} END{exit !found}' "$f"; then
-      mv "$f" "{SESSION_ROOT}/docs/tasks/done/$(basename "$f")"
+      bn="$(basename "$f")"
+      mv "$f" "{SESSION_ROOT}/docs/tasks/done/$bn"
+      # 화해 경로도 대응 .plans 임시파일 정리 (Step 5를 못 거친 누락분)
+      find "{SESSION_ROOT}/docs/tasks/.plans" -maxdepth 1 -type f \( -name "$bn.codex.md" -o -name "$bn.prompt.txt" \) -delete 2>/dev/null || true
       continue
     fi
     MT=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")
