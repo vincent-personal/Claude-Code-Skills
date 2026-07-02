@@ -47,6 +47,22 @@ for skill in kai-task-add kai-task-run kai-task-clear kai-task-list kai-task-unb
   echo "✓ 스킬 $skill → $TARGET_FILE"
 done
 
+# 1b) 루트 독립 스킬 설치 (task-manager 외부, Skills/ 루트에 위치)
+ROOT_DIR="$(dirname "$SKILLS_DIR")"
+for skill in kai-spec; do
+  SRC_FILE="$ROOT_DIR/$skill/SKILL.md"
+  TARGET_FILE="$TARGET_SKILLS_DIR/$skill/SKILL.md"
+  if [ -f "$SRC_FILE" ]; then
+    if [ -e "$TARGET_FILE" ] && [ ! -L "$TARGET_FILE" ]; then
+      echo "⚠️  $TARGET_FILE 가 심볼릭 링크가 아닙니다. 건너뜁니다."
+    else
+      mkdir -p "$TARGET_SKILLS_DIR/$skill"
+      ln -sf "$SRC_FILE" "$TARGET_FILE"
+      echo "✓ 스킬 $skill → $TARGET_FILE"
+    fi
+  fi
+done
+
 # 2) 에이전트 설치 (prefix 없음 — subagent_type으로 호출)
 for agent in advisor.md kai-task-worker.md; do
   if [ -f "$SKILLS_DIR/$agent" ]; then
