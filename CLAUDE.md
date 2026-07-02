@@ -135,6 +135,34 @@ Skills/                           ← 본 repo 루트
 
 ---
 
+### kai-browser
+
+VERIDA 앱 브라우저 검증을 **세 경로로 명시적으로 분리**한다 — agent-browser CLI(기본·최속) / Playwright MCP 도구(대화형) / Playwright node 스크립트(Supabase 토큰 주입·MCP 무관 폴백).
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-browser-agent | `/kai-browser-agent {URL/요청}` | agent-browser(vercel-labs) CLI를 Bash로 직접 호출(가장 빠름). ⚠️node 24 필요. 사용법은 `agent-browser skills get core --full` 런타임 참조(하드카피 금지) |
+| kai-browser-mcp | `/kai-browser-mcp {URL/요청}` | 글로벌 user-scope Playwright MCP(self-chromium, --extension 아님)로 대화형 조작·시각 확인 |
+| kai-browser-node | `/kai-browser-node {URL/요청}` | Playwright 라이브러리 스크립트를 node 실행, Supabase Auth API 토큰을 localStorage 주입(강제 로그인)한 뒤 페이지를 돌며 탐색적으로 검증(화면 덤프 보고 이동·입력·캡처) |
+
+**핵심 설계 원칙 (수정 시 반드시 유지):**
+
+1. **두 모드의 프로필 분리** — MCP는 persistent 공유 프로필(`~/.cache/playwright-mcp-profile`), node는 **공유 프로필 미사용**(매번 자체 토큰 주입). node가 공유 프로필을 열면 MCP의 `SingletonLock` 과 충돌하므로 금지
+2. **MCP 모드는 끝나면 `browser_close`** — 프로필 잠금 해제(node 모드가 이어서 못 여는 것 방지)
+3. **node 인증 = Supabase Auth API → `localStorage['sb-jexlxbzrpapryytdlzxz-auth-token']` 주입 → reload** — 폼 UI 비의존, 결정적. 비번 계정은 `grant_type=password`, yopmail 계정은 OTP
+4. **playwright import 절대경로 고정** — 글로벌 라이브러리, ⚠️ nvm node 버전에 묶임(버전 전환 시 경로 갱신)
+5. **anon/publishable 공개키만** — service_role 금지(RLS 우회)
+6. **산출물은 `dev/qa/`** — 워크스페이스 루트 금지
+7. **dev 서버 직접 시작 금지** — 사용자 터미널에서 실행 중
+8. **kai-browser-agent = agent-browser CLI(node 24 필수)** — bin이 node 24 글로벌. Bash가 22면 `nvm use 24` 프리픽스, 또는 Claude Code를 24로 실행. 사용법은 `agent-browser skills get core --full` 런타임 참조(node_modules 하드카피 금지)
+9. **요청한 스킬 방식을 임의로 바꾸지 않는다** — `/kai-browser-mcp`인데 MCP 도구가 없다고 Bash node로 몰래 폴백 금지(멈추고 알림). 폴백이 "왜 다른 걸로 도냐"의 원흉
+10. **node 24 통일** — agent-browser가 node>=24 요구 → 기본 node 24. playwright MCP·lib도 24 글로벌. nvm 전환 시 경로 갱신(메모리 `project-playwright-mcp-setup` 참조)
+
+설치: `bash {repo}/kai-browser/install.sh` → `~/.claude/skills/kai-browser-{agent,mcp,node}/SKILL.md` 링크.
+전제: 글로벌 Playwright MCP(user scope) + 글로벌 `playwright` 라이브러리. 설정 경위는 dev 메모리 `project-playwright-mcp-setup`.
+
+---
+
 ## 작업 시 준수 규칙
 
 ### 1. 스킬 수정 시

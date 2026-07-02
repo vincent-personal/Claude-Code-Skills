@@ -57,6 +57,26 @@ bash {이 repo}/task-manager/install.sh
 
 ---
 
+### kai-browser
+
+VERIDA 앱을 브라우저로 검증하는 세 경로. agent-browser CLI(기본·최속) / MCP(대화형) / node 스크립트(토큰 주입·MCP 무관 폴백)를 명시적으로 분리한다.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-browser-agent | `/kai-browser-agent {URL/요청}` | agent-browser(vercel-labs) CLI를 Bash로 직접 호출(가장 빠름). ⚠️node 24 필요. 사용법은 `agent-browser skills get core --full` 런타임 참조(하드카피 금지) |
+| kai-browser-mcp | `/kai-browser-mcp {URL/요청}` | 글로벌 user-scope Playwright MCP(self-chromium)로 대화형 조작·시각 확인 |
+| kai-browser-node | `/kai-browser-node {URL/요청}` | Playwright 라이브러리 스크립트를 node 실행, Supabase API 토큰을 localStorage에 주입(강제 로그인)한 뒤 페이지를 돌며 탐색적으로 검증(화면 덤프 보고 이동·입력·캡처) |
+
+설치:
+```bash
+bash {이 repo}/kai-browser/install.sh
+```
+
+- 두 모드는 독립적이다: node 모드는 공유 프로필을 쓰지 않고 매번 자체 인증(토큰 주입)하므로 MCP의 프로필 잠금과 충돌하지 않는다.
+- 전제: 글로벌 Playwright MCP(user scope) + 글로벌 `playwright` 라이브러리. 끊김 이력·재설치 경위는 `dev` 메모리 `project-playwright-mcp-setup` 참조.
+
+---
+
 ## 다중 에이전트 안전성 설계
 
 ### 1. 디렉터리 = 상태, `mv` = 원자적 전이
