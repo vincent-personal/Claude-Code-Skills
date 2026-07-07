@@ -67,11 +67,17 @@ ls "{SESSION_ROOT}/docs/tasks/blocked/"*.md 2>/dev/null
 | `BLOCKED: 커밋실패` | git 상태 확인 방법 + 권한 문제면 settings.json 패치 안내 |
 | `BLOCKED: 시점불일치` | task 설명과 실제 파일 현재 상태 비교 후 task 수정 방법 안내 |
 | `BLOCKED: 완전불가` | 워커가 판단 불가였던 이유 + 사람 판단 필요 항목 명시 |
+| `BLOCKED: add 미완성` (ready:false 고아) | kai-task-add가 후처리 도중 중단된 파일. **미완성일 수 있으므로 자동 복귀 안 함** — 파일 내용을 사용자에게 제시하고 판단 요청(완성 후 복귀 / 폐기) |
 | 기타/불명 | 파일 내용 전체를 보여주고 사용자 판단 요청 |
 
 ---
 
 ### Step 3 — 🟢 자동 복귀 처리
+
+> ★ **todo 복귀 공통 규칙 (Step 3·3-A 모두 적용):** 파일을 `todo/` 로 mv 하기 **전에**, 반드시 frontmatter
+> `ready: true` 를 보장한다(있으면 `true` 로 치환, 없으면 frontmatter에 추가). blocked→todo 복귀는 사람이
+> 검토·승인한 것이므로 착수 가능 상태여야 하며, `ready: false`·부재로 되돌리면 task-run이 **영영 착수하지 않는다**.
+> (`done/` 으로 보내는 committed 고아는 이 규칙 대상이 아니다.)
 
 **Step 2에서 🟢 판정된 작업:**
 
@@ -87,9 +93,15 @@ impact_files:
 mv "{SESSION_ROOT}/docs/tasks/blocked/{f}" "{SESSION_ROOT}/docs/tasks/done/{f}"
 ```
 
-나머지 자동 복귀 대상 → `todo/` 로 이동:
+나머지 자동 복귀 대상 → `todo/` 로 이동 (★ mv 전 ready:true 보장):
 ```bash
-mv "{SESSION_ROOT}/docs/tasks/blocked/{f}" "{SESSION_ROOT}/docs/tasks/todo/{f}"
+BF="{SESSION_ROOT}/docs/tasks/blocked/{f}"
+if awk '/^---$/{c++;next} c==1 && /^ready:/{ok=1} c>=2{exit} END{exit !ok}' "$BF"; then
+  awk 'BEGIN{c=0} /^---$/{c++} c==1 && /^ready:[[:space:]]/{print "ready: true"; next} {print}' "$BF" > "$BF.t" && mv "$BF.t" "$BF"
+else
+  awk 'NR==1 && /^---$/{print; print "ready: true"; next} {print}' "$BF" > "$BF.t" && mv "$BF.t" "$BF"
+fi
+mv "$BF" "{SESSION_ROOT}/docs/tasks/todo/{f}"
 ```
 
 ---
@@ -130,9 +142,15 @@ blocked 사유: {frontmatter 또는 본문의 BLOCKED: 메시지}
 3. 본문에 `## 재설정 구현 방안 (advisor)\n{advisor 응답}` 추가
 4. blocked 사유 주석으로 보존: `<!-- BLOCKED 이력: {사유} -->`
 
-**todo/ 로 복귀:**
+**todo/ 로 복귀 (★ mv 전 ready:true 보장 — Step 3 공통 규칙):**
 ```bash
-mv "{SESSION_ROOT}/docs/tasks/blocked/{f}" "{SESSION_ROOT}/docs/tasks/todo/{f}"
+BF="{SESSION_ROOT}/docs/tasks/blocked/{f}"
+if awk '/^---$/{c++;next} c==1 && /^ready:/{ok=1} c>=2{exit} END{exit !ok}' "$BF"; then
+  awk 'BEGIN{c=0} /^---$/{c++} c==1 && /^ready:[[:space:]]/{print "ready: true"; next} {print}' "$BF" > "$BF.t" && mv "$BF.t" "$BF"
+else
+  awk 'NR==1 && /^---$/{print; print "ready: true"; next} {print}' "$BF" > "$BF.t" && mv "$BF.t" "$BF"
+fi
+mv "$BF" "{SESSION_ROOT}/docs/tasks/todo/{f}"
 ```
 
 > `BLOCKED: 커밋실패` 는 advisor 없이 Step 4 수동 안내로만 처리.

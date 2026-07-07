@@ -59,11 +59,16 @@ done
 done_cnt=$(ls "{SESSION_ROOT}"/docs/tasks/done/*.md 2>/dev/null | wc -l)
 ```
 
-추출 필드: `title`, `impact_files`, (doing의 경우) `claimed_at`. 본문은 읽지 않는다.
+추출 필드: `title`, `impact_files`, `ready`, (doing의 경우) `claimed_at`. 본문은 읽지 않는다.
+
+> 💡 **todo 는 `ready` 값으로 2분한다:**
+> - `ready: true` **또는 필드 부재**(레거시 — task-run이 곧 stamp) → **🔵 미시작**(착수 대기).
+> - `ready: false` → **🔒 준비중**(add 후처리 미완/중단 — task-run이 아직 착수 안 함).
 
 | 디렉터리 | 의미 |
 |---|---|
-| `todo/` | 미시작 |
+| `todo/` (ready≠false) | 미시작 — 착수 대기 |
+| `todo/` (ready:false) | 준비중 — add 후처리 미완 |
 | `doing/` | 진행중 (선점됨) |
 | `blocked/` | 확인필요·막힘 |
 | `done/` | 완료 → **목록에서 제외**(개수만 보고) |
@@ -78,9 +83,12 @@ done_cnt=$(ls "{SESSION_ROOT}"/docs/tasks/done/*.md 2>/dev/null | wc -l)
 ```
 📋 미완료 작업 목록 — {SESSION_ROOT 기준 프로젝트명}
 
-🔵 미시작 todo (N개)  ※ 위에서부터 실행됨(FIFO)
+🔵 미시작 todo (N개)  ※ 위에서부터 실행됨(FIFO)  ← ready≠false 만
   1. {title}  [파일: foo.ts, bar.scss]   (id: a3f)
   2. {title}  [파일: baz.ts]             (id: b7d)
+
+🔒 준비중 (M개)  ※ add 후처리 미완(ready:false) — task-run 착수 안 함
+  • {title}  [파일: xyz.ts]  (id: c1e)
 
 🟡 진행중 doing (N개)
   • {title}  [파일: qux.ts]  (선점: YYYY-MM-DD HH:MM)

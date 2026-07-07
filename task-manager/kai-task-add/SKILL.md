@@ -217,7 +217,24 @@ awk '/^---$/{c++; next} c==1 && /^impact_files:/{found=1} END{exit !found}' "$FI
   && echo "OK: impact_files 확인" \
   || echo "ERROR: impact_files 누락 — 즉시 Edit으로 추가 후 재검증"
 ```
-`ERROR` 출력 시 → `impact_files:` 배열을 frontmatter에 Edit으로 추가 → 재검증 통과 후에만 `RESULT:` 반환.
+`ERROR` 출력 시 → `impact_files:` 배열을 frontmatter에 Edit으로 추가 → 재검증 통과 후에만 I-d로 진행.
+
+**I-d. 최종 ready 플립 (반드시 마지막 동작 · RESULT 반환 직전 · Bash 툴 실행):**
+
+I-c(impact_files 검증)까지 **전부 통과한 뒤**, 생성한 각 todo 파일의 frontmatter `ready` 를 `true` 로 승격한다.
+이 플립 전까지 파일은 `ready: false` 로 todo/ 에 있어 task-run이 **착수하지 않는다**(strict 게이트). 플립이 add 워크플로우의 **최종 동작**이며, 이후 파일을 더 수정하지 않는다.
+
+```bash
+FILE="{SESSION_ROOT}/docs/tasks/todo/{FILENAME}"
+awk 'BEGIN{c=0} /^---$/{c++} c==1 && /^ready:[[:space:]]/{print "ready: true"; next} {print}' "$FILE" > "$FILE.rdytmp" && mv "$FILE.rdytmp" "$FILE"
+awk '/^---$/{c++;next} c==1 && /^ready:[[:space:]]*true/{ok=1} END{exit !ok}' "$FILE" \
+  && echo "OK: ready=true (착수 가능)" \
+  || echo "ERROR: ready 플립 실패 — 재시도 후에만 RESULT 반환"
+```
+
+- **분할로 여러 파일**을 만든 경우: 모든 파일을 다 생성·I-c 검증한 뒤, **마지막에 각 파일에** 위 플립을 적용한다.
+- **병합(Step 1-A)** 인 경우: 기존 파일의 `ready` 값을 내렸다 올리지 않는다(claim 창을 새로 열지 않음). Edit만 하고 기존 상태를 유지한다 — Edit-실패 가드가 무결성을 보장하고, 레거시 ready 부재 파일은 task-run Step 0-A stamp가 승격한다.
+- 플립 실패(ERROR)면 재시도. `OK` 확인 후에만 `RESULT:` 반환.
 
 포맷:
 ```
@@ -227,6 +244,7 @@ title: {제목}
 created: {YYYY-MM-DD HH:MM}
 tier: {1|2|3}
 advisor: {done|skipped|pending}
+ready: false        # add 후처리 미완 표식 — I-d 최종 플립에서 true. task-run은 ready:true만 착수.
 screen_work: {true|false}
 impact_files:
   - path/to/file.ts
@@ -273,7 +291,7 @@ committed:
 
 1. `check-list.md` 의 각 항목(`- [ ]/[~]/[x]/[!]`)을 등장 순서대로 파싱.
 2. 상태 매핑: `[ ]`·`[~]`→`todo/`(선점 해제), `[x]`→`done/`, `[!]`→`blocked/`.
-3. 항목마다 task 파일 생성 (§Step 4 포맷). **등장 순서 보존**을 위해 id 접두를 옛 작업임이 드러나도록 부여:
+3. 항목마다 task 파일 생성 (§Step 4 포맷, 이미 완성된 레거시이므로 `ready: true`). **등장 순서 보존**을 위해 id 접두를 옛 작업임이 드러나도록 부여:
    - `id: 00000000-000000-{4자리순번}` (예 `00000000-000000-0001`) → FIFO에서 신규보다 먼저 선택됨.
 4. 변환 완료 후 `check-list.md` → `check-list.md.migrated` 로 rename (재실행 방지).
 5. "🔄 레거시 N건 마이그레이션 완료" 보고.
@@ -469,6 +487,7 @@ title: {제목}
 created: {YYYY-MM-DD HH:MM}
 tier: {1|2|3}
 advisor: {done|skipped|pending}
+ready: false      # add 후처리 미완 표식 — Step 4-A 최종 플립에서 true. task-run은 ready:true만 착수.
 screen_work: {true|false}
 impact_files:
   - path/to/file1.ts
@@ -501,6 +520,22 @@ mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/{FILENAME}"
 - `status` 필드는 두지 않는다 — **디렉터리 위치가 상태의 유일 권위**.
 - `impact_files` 는 **의무**. 최소 1개. 없으면 task-run 충돌 검사가 동작하지 않는다.
 - `predecessors` 는 선행 작업 id 배열(없으면 `[]`).
+- `ready` 는 **add 후처리 완료 게이트**. staging Write 시 `false` 로 두고, 모든 검증 후 Step 4-A에서 `true` 로 플립한다. task-run은 `ready: true` 인 파일만 착수한다(strict).
+
+---
+
+### Step 4-A — 최종 ready 플립 (모든 생성·검증 후 마지막 동작)
+
+Step 4(및 병합/분할)까지 **전부 끝난 뒤**, 이번에 신규 생성한 각 todo 파일의 `ready` 를 `true` 로 승격한다.
+플립 전까지 파일은 `ready: false` 상태로 todo/ 에 노출되어도 task-run이 착수하지 않으므로, add가 중간에 종료·실패해도 **미완성 파일이 실행되는 사고가 원천 차단**된다.
+
+```bash
+FILE="{SESSION_ROOT}/docs/tasks/todo/{FILENAME}"
+awk 'BEGIN{c=0} /^---$/{c++} c==1 && /^ready:[[:space:]]/{print "ready: true"; next} {print}' "$FILE" > "$FILE.rdytmp" && mv "$FILE.rdytmp" "$FILE"
+```
+
+- **분할** 시: 모든 파일을 다 생성·검증한 뒤 마지막에 각 파일을 플립한다.
+- **병합(Step 1-A)** 시: 기존 파일의 `ready` 는 건드리지 않는다(내렸다 올려 새 claim 창을 열지 않음). 레거시 ready 부재 파일은 task-run Step 0-A stamp가 승격한다.
 
 ---
 
@@ -522,6 +557,8 @@ mv "$STAGE" "{SESSION_ROOT}/docs/tasks/todo/{FILENAME}"
 - ❌ **`--{slug}` 구분자 생략** — slug 없어도 `--task` 필수 (`{ID}.md` 형식 금지)
 - ❌ **impact_files를 본문에만 기재** — frontmatter `impact_files:` 배열이 반드시 있어야 함 (I-c 검증 필수)
 - ❌ **impact_files 없이 RESULT: 반환** — I-c 통과 후에만 RESULT: 출력 가능
+- ❌ **ready:false 상태로 종료** — 모든 검증(I-c) 통과 후 반드시 최종 단계(I-d/Step 4-A)에서 ready:true로 플립. 플립 없이 RESULT 반환 금지 (task-run이 영영 착수 못 함)
+- ❌ **staging Write 시 ready 필드 누락** — frontmatter에 `ready: false` 를 반드시 포함(누락 시 task-run이 착수 안 함)
 - ❌ **병합 시 Write로 todo 파일 재생성** — Edit-only, 실패 시 신규파일 fallback
 - ❌ **영향 파일(impact_files) 없이 생성** (충돌 검사 무력화)
 - ❌ frontmatter에 `status` 필드 추가 (디렉터리가 권위 — drift 유발)

@@ -8,7 +8,7 @@
 #   NONE                 착수 가능한 작업 없음
 
 SESSION_ROOT="${1:-}"
-MAX_BATCH="${2:-5}"
+MAX_BATCH="${2:-5}"   # 전역 동시성 상한 N — 슬롯 리필 시 '도는 워커 포함' 최대 N (배치 최대치가 아님)
 
 [ -z "$SESSION_ROOT" ] && { echo "Usage: $0 <SESSION_ROOT> [max_batch]" >&2; exit 1; }
 
@@ -23,13 +23,24 @@ mkdir -p "$TODO" "$DOING" "$DONE" "$BLOCKED" "$TASKS/.staging" "$PLANDIR"
 # done IDs (predecessors 검사용 — '--' 이전 prefix만 추출)
 done_ids=$(ls "$DONE/" 2>/dev/null | sed 's/--.*//' || true)
 
-# doing/ 에서 잠긴 파일 목록 수집
+# doing/ 에서 잠긴 파일 목록 + 점유 슬롯 수 수집
 locked_files=""
+doing_count=0
 for df in "$DOING"/*.md; do
   [ -e "$df" ] || continue
+  doing_count=$((doing_count + 1))
   files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$df")
   locked_files="$locked_files $files"
 done
+
+# 가용 슬롯 = 전역 동시성 상한(MAX_BATCH=N) − 현재 도는 워커 수.
+#   배치 모델(호출 시 doing 비어있음)에선 available=N → 기존과 완전 동일(하위호환).
+#   슬롯 리필 모델에선 도는 워커 수만큼 줄어, 그만큼만 새로 선점 → 동시성 N 유지.
+available=$((MAX_BATCH - doing_count))
+if [ "$available" -le 0 ]; then
+  echo "NONE"
+  exit 0
+fi
 
 # FIFO 순회 — 배치 구성
 BATCH=()
@@ -38,6 +49,13 @@ batch_files=""
 for tf in $(ls "$TODO"/*.md 2>/dev/null | sort); do
   [ -e "$tf" ] || continue
   f=$(basename "$tf")
+
+  # ⓪ ready 게이트 (strict) — add 후처리 완료 표식(ready:true)만 착수한다.
+  #    부재·false·기타 값은 전부 skip → add 진행중/미완성/크래시 파일이 실행되지 않음.
+  #    (레거시 ready 부재 파일은 kai-task-run Step 0-A가 ready:true로 1회 stamp함)
+  #    frontmatter 스코프(c==1)로만 검사 — 본문에 우연히 'ready:'가 있어도 무시.
+  ready=$(awk '/^---$/{c++;next} c==1 && /^ready:/{v=$2; gsub(/[[:space:]]/,"",v); print v; exit}' "$tf")
+  [ "$ready" = "true" ] || continue
 
   # ① 선행조건 — predecessors 모두 done에 있어야 함
   preds=$(awk '/^---$/{c++; next} c==1 && /^predecessors:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
@@ -64,7 +82,7 @@ for tf in $(ls "$TODO"/*.md 2>/dev/null | sort); do
   # ④ 배치 추가
   BATCH+=("$f")
   batch_files="$batch_files $candidate_files"
-  [ "${#BATCH[@]}" -ge "$MAX_BATCH" ] && break
+  [ "${#BATCH[@]}" -ge "$available" ] && break
 done
 
 if [ "${#BATCH[@]}" -eq 0 ]; then
