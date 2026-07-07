@@ -82,7 +82,7 @@ allowed-tools:
 mkdir -p "{SESSION_ROOT}/docs/tasks"/{todo,doing,done,blocked,.staging,.plans}
 ```
 
-> `.plans/` — tier≥2 task의 Codex 리스크분석(`*.codex.md`)을 임시 저장하는 공간 (Step 2 선점 Bash가 생성, codex 가용 시에만). 워커 구현 후 Step 5(폴링 종료 직후)가 분석을 done task 본문에 첨부하고 원본은 삭제 → `.plans/`는 비워지며, 잔여물은 다음 run 시작 시 60분 GC.
+> `.plans/` — tier≥2 task의 Codex 리스크분석(`*.codex.md`)을 임시 저장하는 공간 (Step 2 선점 Bash가 생성, codex 가용 시에만). 워커 구현 후 Step 5(폴링 종료 직후) 또는 **다음 run의 Step 0-A finalize sweep**이 분석을 done 본문에 첨부하고 원본을 삭제한다 → `.plans/`는 비워진다. poll을 못 거친 고아도 다음 run 진입 시 sweep이 복구하며, prompt.txt만 남은 잔여는 60분 GC가 backstop.
 
 ---
 
@@ -109,8 +109,8 @@ if ls "{SESSION_ROOT}"/docs/tasks/doing/*.md 2>/dev/null | grep -q .; then
     if awk '/^---$/{c++; next} c==1 && /^committed:[[:space:]]*[0-9a-f]/{found=1} END{exit !found}' "$f"; then
       bn="$(basename "$f")"
       mv "$f" "{SESSION_ROOT}/docs/tasks/done/$bn"
-      # 화해 경로도 대응 .plans 임시파일 정리 (Step 5를 못 거친 누락분)
-      find "{SESSION_ROOT}/docs/tasks/.plans" -maxdepth 1 -type f \( -name "$bn.codex.md" -o -name "$bn.prompt.txt" \) -delete 2>/dev/null || true
+      # .plans 는 여기서 지우지 않는다 — 아래 finalize sweep이 done 본문에 Codex 분석을
+      # 첨부한 뒤 삭제한다. 조기 삭제하면 첨부할 원본이 사라져 분석이 유실된다.
       continue
     fi
     MT=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")
@@ -118,16 +118,51 @@ if ls "{SESSION_ROOT}"/docs/tasks/doing/*.md 2>/dev/null | grep -q .; then
   done
 fi
 
-# staging / 오래된 codex 플랜 고아 청소
+# Codex 분석 종결 sweep — poll(Step 5)을 못 거친 .plans 고아를 loop 시작 시 복구한다.
+#   done/archive면 (미첨부 시) Codex 분석을 done 본문에 첨부 후 삭제, blocked면 삭제,
+#   todo/doing(진행중)이면 건드리지 않음. poll(Step 5)과 같은 헬퍼를 공유(첨부 포맷 단일화).
+#   위 화해 경로가 done으로 옮긴 것도 여기서 첨부된다(그래서 화해가 .plans를 지우지 않았다).
+#   ※ 완전 예방이 아니라 다음 run 진입 시 자동 복구다 — 현재 run이 또 끊기면 새 고아가
+#     생기고 다음 run sweep이 걷어낸다.
+FINALIZE="$HOME/.claude/tools/task-finalize-codex.sh"
+[ -x "$FINALIZE" ] && bash "$FINALIZE" "{SESSION_ROOT}"
+
+# staging / codex 고아 backstop 청소 (codex 실패로 prompt.txt만 남은 경우 등)
 find "{SESSION_ROOT}/docs/tasks/.staging" -type f -mmin +30 -delete 2>/dev/null
 find "{SESSION_ROOT}/docs/tasks/.plans" -type f -mmin +60 -delete 2>/dev/null
 
-# todo 카운트
+# ready 마이그레이션 (레거시 1회·멱등) — ready: 필드가 없는 todo 파일에 ready: true stamp.
+#   strict claim 게이트(task-claim-and-plan.sh ⓪)가 ready 부재 파일을 얼리지 않도록,
+#   ready 도입 이전 세대 파일만 승격한다. add가 만든 신규 파일은 항상 ready 필드를
+#   가지므로 이 루프에서 건드려지지 않는다(멱등 — 매 run 시작 실행해도 무해).
+for tf in "{SESSION_ROOT}"/docs/tasks/todo/*.md; do
+  [ -e "$tf" ] || continue
+  awk '/^---$/{c++;next} c==1 && /^ready:/{f=1} c>=2{exit} END{exit !f}' "$tf" && continue
+  awk 'NR==1 && /^---$/{print; print "ready: true"; next} {print}' "$tf" > "$tf.rdytmp" \
+    && mv "$tf.rdytmp" "$tf"
+done
+
+# ready:false 고아 sweep — add가 후처리 도중 중단되어 미완성(ready:false)으로 30분+
+#   방치된 todo 파일을 blocked/로 격리한다. 기존 kai-task-unblock 기계가 진단·처리한다.
+NOW2=$(date +%s)
+for tf in "{SESSION_ROOT}"/docs/tasks/todo/*.md; do
+  [ -e "$tf" ] || continue
+  rv=$(awk '/^---$/{c++;next} c==1 && /^ready:/{v=$2; gsub(/[[:space:]]/,"",v); print v; exit}' "$tf")
+  [ "$rv" = "false" ] || continue
+  MT=$(stat -f %m "$tf" 2>/dev/null || stat -c %Y "$tf")
+  [ $((NOW2 - MT)) -gt 1800 ] || continue
+  printf '\n<!-- BLOCKED: add 미완성 (ready:false 30분+ 고아) -->\n' >> "$tf"
+  mv "$tf" "{SESSION_ROOT}/docs/tasks/blocked/$(basename "$tf")"
+done
+
+# todo 카운트 (claimable = ready:true — 위 마이그레이션 후 부재는 남지 않음)
 remaining=$(ls "{SESSION_ROOT}"/docs/tasks/todo/*.md 2>/dev/null | wc -l | tr -d ' ')
 echo "remaining=$remaining"
 ```
 
 `remaining=0` → `"✅ 모든 작업 완료 — todo/ 비어있음."` 출력 후 **종료**.
+
+> ℹ️ `remaining>0` 이어도 전부 `ready:false`(add 미완성·아직 후처리 중)면 Step 2 선점이 `NONE`을 반환한다 — strict 게이트가 정상 동작한 것이며, 착수 가능한 준비완료 작업이 없다는 뜻이다.
 
 ---
 
@@ -194,7 +229,7 @@ echo "$output"
 `output` 파싱 (Step 6 보고용):
 - `DONE:<f>` / `BLOCKED:<f>` / `TIMEOUT:<f>`
 
-> blocked/timeout task의 `.codex.md` 는 스크립트가 done 확인 후 남겨 둠 → 다음 시도 재사용 또는 Step 0-A 60분 GC로 정리.
+> 종결(첨부+청소)은 `task-finalize-codex.sh` 가 수행한다(Step 0-A sweep과 공유). done/archive면 미첨부 시 Codex 분석을 본문에 첨부 후 삭제, blocked면 삭제한다. poll을 못 거친 고아(세션 중단 등)는 다음 run **Step 0-A finalize sweep**이 복구하고, codex 실패로 prompt.txt만 남은 잔여는 60분 GC가 backstop 처리한다.
 
 ---
 

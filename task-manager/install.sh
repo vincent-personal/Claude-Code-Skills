@@ -81,7 +81,7 @@ done
 # 3) 헬퍼 툴 설치 (~/.claude/tools/ — 심볼릭 링크)
 TARGET_TOOLS_DIR="$HOME/.claude/tools"
 mkdir -p "$TARGET_TOOLS_DIR"
-for tool in codex-plan.sh task-claim-and-plan.sh task-poll-and-attach.sh; do
+for tool in codex-plan.sh task-claim-and-plan.sh task-poll-and-attach.sh task-finalize-codex.sh; do
   SRC="$SKILLS_DIR/tools/$tool"
   DST="$TARGET_TOOLS_DIR/$tool"
   if [ -f "$SRC" ]; then

@@ -46,25 +46,13 @@ for f in "${CLAIMED_BATCH[@]}"; do
   fi
 done
 
-# Codex 리스크 분석 → done task 본문에 첨부 + .plans 임시파일 정리
-# done/blocked/timeout 모든 종료 상태에서 임시파일 정리
-# (blocked 재시도 시 task-claim-and-plan.sh 가 새로 생성하므로 보존 불필요)
-for f in "${CLAIMED_BATCH[@]}"; do
-  plan="$PLANDIR/$f.codex.md"
-  dt="$DONE/$f"
-  # done task이고 codex 성공했으면 본문에 첨부
-  if [ -f "$dt" ] && [ -f "$plan" ]; then
-    {
-      echo
-      echo "## Codex 리스크 분석 (참고)"
-      echo "> Codex가 독립 수행한 적대적 리뷰(치명적 위험·사각지대·대안 접근). 실제 구현은 워커(Claude)가 이를 자체 플랜과 종합·최종판단한 결과이므로 이와 다를 수 있다."
-      echo
-      cat "$plan"
-    } >> "$dt"
-  fi
-  # 종료 상태(done/blocked/timeout) 무관하게 임시파일 항상 정리
-  find "$PLANDIR" -maxdepth 1 -type f \( -name "$f.codex.md" -o -name "$f.prompt.txt" \) -delete 2>/dev/null || true
-done
+# Codex 리스크 분석 종결(본문 첨부 + .plans 청소) — 공용 헬퍼로 위임.
+# loop 시작 sweep(kai-task-run Step 0-A)과 동일 로직을 공유해 첨부 포맷 드리프트를 막는다.
+# done/archive면 (미첨부 시) 첨부 후 삭제, blocked면 삭제 — 종료 상태 판정은 헬퍼가 수행.
+FINALIZE="$HOME/.claude/tools/task-finalize-codex.sh"
+if [ -x "$FINALIZE" ]; then
+  bash "$FINALIZE" "$SESSION_ROOT" "${CLAIMED_BATCH[@]}"
+fi
 
 # 결과 출력
 for f in "${CLAIMED_BATCH[@]}"; do
