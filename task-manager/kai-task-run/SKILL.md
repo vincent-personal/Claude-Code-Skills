@@ -31,12 +31,13 @@ allowed-tools:
 ## 역할 및 구조
 
 ```
-메인 세션 (얇은 루프 · 컨텍스트 최소)
-  ┌─ Step 0-A: 잠금확인 + 좀비복구 + todo확인 [단일 Bash]  ← 루프 시작점
-  │  Step 2:   배치 선점 + (tier≥2+codex) Codex 리스크분석 launch+wait  [한 Bash · codex 없으면 자동skip]
-  │  Step 4:   배치 병렬 스폰
-  │  Step 5:   배치 폴링 + (종료 직후) Codex 분석 done 첨부·정리  [한 Bash]
-  └─ Step 6:   완료 보고 + 아카이브 → Step 0-A로 루프
+메인 세션 (얇은 루프 · 컨텍스트 최소 · 슬롯 리필)
+  ┌─ Step 0-A: 잠금확인 + 좀비복구 + finalize sweep + todo확인 [단일 Bash]  ← 진입 1회
+  │  ── 리필 루프 (INFLIGHT = 도는 워커 목록을 메인 세션이 유지) ──
+  │  Step 2:   가용 슬롯만큼 선점(available = N − 도는 워커 수) + Codex launch+wait  [한 Bash]
+  │  Step 4:   이번에 새로 선점한 것만 스폰
+  │  Step 5:   INFLIGHT 중 하나라도 완료 시 반환(빈 슬롯 리필 신호) + Codex 첨부  [한 Bash]
+  └─ Step 6:   완료분 보고 → Step 2로 (슬롯 재충전). INFLIGHT 비고 Step2 NONE이면 종료
 
 백그라운드 워커 (작업 1개 완수 후 조용히 종료)
   W-0:   작업 파일 Read + PROJECT_ROOT 결정
@@ -166,37 +167,42 @@ echo "remaining=$remaining"
 
 ---
 
-### Step 2 — 배치 선점 + Codex 리스크 분석
+### Step 2 — 슬롯 채우기 (가용 슬롯만큼 선점) + Codex 리스크 분석
 
-> **모든 로직은 `task-claim-and-plan.sh` 가 수행한다** — FIFO 선정·mv 선점·Codex launch+wait 를 하나의 실행 파일에 담아, LLM이 단계를 쪼개거나 건너뛸 수 없게 한다.
+> **모든 로직은 `task-claim-and-plan.sh` 가 수행한다** — FIFO 선정·슬롯 인식(가용 = N − 도는 워커 수)·mv 선점·Codex launch+wait 를 하나의 실행 파일에 담아, LLM이 단계를 쪼개거나 건너뛸 수 없게 한다.
 > `task-claim-and-plan.sh` 미설치 시 `[ -x ]` 가 false → 전체 skip (원래 동작).
 >
 > ⚠️ **이 Bash 호출은 `timeout: 600000`(10분) 으로 실행한다** — Codex 가 수십 초~수 분 걸릴 수 있어 기본 2분에 끊기지 않게 한다.
 
 ```bash
+# 리필 루프 매 회전 시작: 사용자 잠금 확인 (Step 0-A는 진입 1회이므로 여기서 반응)
+[ -f "{SESSION_ROOT}/.claude/user.lock" ] && echo "⏸ user.lock — 새 선점 중단(도는 워커는 자체 완료)." && exit 0
+
 output=$(bash "$HOME/.claude/tools/task-claim-and-plan.sh" "{SESSION_ROOT}" 5)
 echo "$output"
 ```
 
+> `INFLIGHT` = 현재 도는 워커의 task 파일명 목록. 메인 세션이 리필 루프 내내 유지한다(Step 2 선점으로 추가, Step 6 완료 보고로 제거). 첫 진입 시 빈 배열. claim 스크립트는 doing/ 을 세어 `available = N − doing_count` 만큼만 선점하므로 동시 워커가 N을 넘지 않는다.
+
 `output` 파싱:
-- `NONE` → **"착수 가능한 작업 없음."** 출력 후 **종료**
-- `CLAIMED:<f>` 줄 → `CLAIMED_BATCH` 배열에 추가 (`f` = 파일명)
+- `CLAIMED:<f>` 줄 → **이번 회전 스폰 대상**(`SPAWN` 배열)에 추가 **및 `INFLIGHT` 에 추가** (`f`=파일명). 각 파일에 frontmatter `claimed_at`/`claimed_by` 기록(Edit).
+- `NONE`:
+  - `INFLIGHT` 가 **비었으면** → `"✅ 모든 작업 완료."` 출력 후 **종료**.
+  - `INFLIGHT` 가 **있으면**(도는 워커 존재) → 이번엔 `SPAWN` 없이 곧장 **Step 5(대기)로**. (파일 충돌·슬롯이 풀리면 다음 회전에 선점된다 — 충돌·기아 해소)
 - `CODEX:<n>` → 로그 출력 (`n`건 Codex 완료)
 
-선점 성공한 각 파일에 frontmatter `claimed_at` / `claimed_by` 기록(Edit).
-
 ---
 
 ---
 
-### Step 4 — 배치 병렬 스폰
+### Step 4 — 이번 회전 스폰 (새로 선점한 것만)
 
-> **Codex 리스크 분석은 Step 2(`task-claim-and-plan.sh`)가 이미 완료했다.** 워커 스폰 시점엔 `.plans/{f}.codex.md` 가 (codex 가용·tier≥2 시) 이미 디스크에 있다. 여기서는 워커만 띄운다. (codex 미설치·저tier면 `.codex.md` 가 없을 뿐, 워커는 정상 진행)
+> **Codex 리스크 분석은 Step 2가 이미 완료했다.** 스폰 시점엔 `.plans/{f}.codex.md` 가 (codex 가용·tier≥2 시) 이미 디스크에 있다. 여기서는 **이번에 새로 선점한 `SPAWN`의 워커만** 띄운다 — 이미 도는 `INFLIGHT` 워커는 그대로 둔다. (codex 미설치·저tier면 `.codex.md` 가 없을 뿐, 워커는 정상 진행)
 
-`CLAIMED_BATCH`의 각 task에 대해 **하나의 응답에서 Agent를 동시 호출**한다:
+`SPAWN` 이 비어있으면(Step 2에서 `NONE` + `INFLIGHT` 있음) 스폰 없이 Step 5로 간다. 아니면 `SPAWN`의 각 task에 대해 **하나의 응답에서 Agent를 동시 호출**한다:
 
 ```
-# CLAIMED_BATCH의 각 f에 대해 동시에 (parallel):
+# SPAWN의 각 f에 대해 동시에 (parallel):
 Agent({
   subagent_type: "kai-task-worker",
   run_in_background: true,
@@ -211,38 +217,37 @@ CLAIMED_FILE: {SESSION_ROOT}/docs/tasks/doing/{f}
 > PROJECT_ROOT는 워커가 CLAIMED_FILE의 impact_files에서 직접 결정한다.
 > Codex 리스크분석(Step 2 선점 Bash에서 띄움·대기 완료)은 워커 W-1이 `.plans/{f}.codex.md` 로 참조한다.
 
-모든 Agent 호출 후 즉시 Step 5(폴링)로 이동. 워커 반환값을 기다리지 않는다.
+모든 Agent 호출 후 즉시 Step 5로 이동. 워커 반환값을 기다리지 않는다.
 
 ---
 
-### Step 5 — 배치 폴링 + Codex 첨부
+### Step 5 — 하나라도 완료될 때까지 대기 (슬롯 리필) + Codex 첨부
 
-> **폴링·timeout 처리·Codex 첨부 모두 `task-poll-and-attach.sh` 가 수행한다** — 폴링 종료 직후 첨부까지 한 실행 파일에서 처리하므로, 첨부 단계를 건너뛸 수 없다.
+> **`task-poll-and-attach.sh` 가 `INFLIGHT` 중 하나라도 종료되면 즉시 반환**한다(빈 슬롯 리필 신호). 진행중은 `RUNNING`. timeout 처리(MAX 1시간 동안 아무도 안 끝남)·Codex 첨부도 이 스크립트가 수행하므로, 첨부 단계를 건너뛸 수 없다.
 >
 > ⚠️ **이 Bash 호출은 `timeout: 3660000`(61분) 으로 실행한다** — 폴링 MAX(3600초) + 여유 시간.
 
 ```bash
-output=$(bash "$HOME/.claude/tools/task-poll-and-attach.sh" "{SESSION_ROOT}" "${CLAIMED_BATCH[@]}")
+output=$(bash "$HOME/.claude/tools/task-poll-and-attach.sh" "{SESSION_ROOT}" "${INFLIGHT[@]}")
 echo "$output"
 ```
 
-`output` 파싱 (Step 6 보고용):
-- `DONE:<f>` / `BLOCKED:<f>` / `TIMEOUT:<f>`
+`output` 파싱:
+- `DONE:<f>` / `BLOCKED:<f>` → **`INFLIGHT` 에서 제거** + Step 6 보고에 누적.
+- `RUNNING:<f>` → `INFLIGHT` 유지(아직 도는 중 — 다음 회전 Step 5에 다시 넘어간다).
 
 > 종결(첨부+청소)은 `task-finalize-codex.sh` 가 수행한다(Step 0-A sweep과 공유). done/archive면 미첨부 시 Codex 분석을 본문에 첨부 후 삭제, blocked면 삭제한다. poll을 못 거친 고아(세션 중단 등)는 다음 run **Step 0-A finalize sweep**이 복구하고, codex 실패로 prompt.txt만 남은 잔여는 60분 GC가 backstop 처리한다.
 
 ---
 
-### Step 6 — 완료 보고 + 아카이브 + 루프
+### Step 6 — 완료분 보고 + 리필 루프
 
-### Step 6 — 완료 보고
-
-CLAIMED_BATCH의 각 task 결과를 출력:
+이번 회전에 종료된(Step 5의 `DONE`/`BLOCKED`) task 결과만 출력:
 ```
 ✅ [{id접미}] {제목}          (done/)
 ⚠️ [{id접미}] {제목} — blocked  (blocked/)
-🕐 [{id접미}] {제목} — timeout  (timeout)
 ```
+(MAX 초과 좀비 정리분은 committed 여부에 따라 done/blocked 로 이미 분류되어 위와 동일하게 보고된다.)
 
 **아카이브** (done/ > 30개 시 오래된 것부터 done/archive/ 이동):
 ```bash
@@ -251,7 +256,8 @@ cnt=$(ls "{SESSION_ROOT}"/docs/tasks/done/*.md 2>/dev/null | wc -l | tr -d ' ')
 # cnt > 30 이면 (cnt-30)개를 done/archive/ 로 mv (이름순 정렬 앞에서부터)
 ```
 
-**→ Step 0-A로 돌아가 다음 작업 처리.**
+**→ Step 2로 돌아가 빈 슬롯을 다시 채운다** (리필 루프). Step 2가 `NONE` 이고 `INFLIGHT` 가 비면 그때 종료한다.
+> 배치 배리어와 달리, 한 워커가 오래 걸려도 다른 슬롯은 Step 2·5·6을 계속 돌며 새 작업을 착수한다 — 긴 작업이 짧은 작업을 막지 않는다. Step 0-A(무거운 좀비복구·sweep)는 재진입하지 않는다(진입 시 1회). 좀비는 Step 5의 MAX(61분) timeout이 커버한다.
 
 ---
 
