@@ -64,7 +64,7 @@ Skills/                           ← 본 repo 루트
 
 | 스킬 | 명령 | 역할 |
 |---|---|---|
-| kai-task-add | `/kai-task-add {설명}` | 영향 파일(impact_files) 의무 기록과 함께 `docs/tasks/todo/`에 task 파일 1개 추가 (staging→원자적 mv) |
+| kai-task-add | `/kai-task-add {설명}` | 영향 파일(impact_files) 의무 기록과 함께 `docs/tasks/todo/`에 task 파일 1개 추가 (staging→원자적 mv · 등록은 백그라운드 Agent — 턴 즉시 종료) |
 | kai-task-run | `/kai-task-run` | todo/ 의 가장 먼저 만든 작업을 `mv` 원자 선점 → Tier별 advisor → 코드 → 빌드 → `done/` 이동 |
 | kai-task-clear | `/kai-task-clear` | `done/` 완료 작업을 `done/archive/`로 정리 (읽기/이동 전용) |
 | kai-task-list | `/kai-task-list` | 미완료(todo·doing·blocked)를 frontmatter만 스캔하여 FIFO 요약 출력 (읽기 전용) |
@@ -80,13 +80,14 @@ Skills/                           ← 본 repo 루트
 7. **predecessors 선행조건** — claim 전 선행 id가 모두 `done/`에 있어야 착수
 8. **좀비/고아 자동 복구 + 완료 화해** — doing/ 의 `committed:` 마커 있으면 곧장 done/ 으로 화해(재실행 금지), 없고 30분 경과면 todo/ 복귀, `.staging/` 고아 청소
 9. **워크트리 절대 금지** — 과거 사고 재발 방지 (Red Lines)
-10. **Tier 분류 (1/2/3)** — advisor(Opus) 호출 여부 결정. `advisor: done` 시 run에서 재호출 생략
+10. **Tier 분류 (1/2/3)** — Tier 3 advisor(Opus) 자문은 **add 전용**(등록 시 구현방안·impact_files 확정 — 충돌 게이트 입력은 claim 이전에 완성돼야 함). run은 advisor를 호출하지 않으며 tier≥2 Codex 리스크 분석만 수행. **Tier 3 워커는 `model: "opus"` 로 스폰**(구현 자체가 난제인 부류의 탈출구), tier 1·2 워커는 세션 모델(경량) 상속
 11. **아카이브 일원화** — 완료 정리는 **task-run에서만**(`[x]` 생산 주체가 run). add에서 제거
 12. **레거시 자동 마이그레이션** — add/run Step 0에서 기존 `check-list.md` → `tasks/` 1회 변환
 13. **컨텍스트 절감** — 본문 통째 읽기 금지, frontmatter만 `awk '/^---$/{c++;next}c==1'` 추출
 14. **사용자 잠금** — `.claude/user.lock` 파일로 백그라운드 루프 정지
 15. **빌드 락 파일** — `.claude/build.lock` 으로 동시 빌드 직렬화
 16. **완료 무결성** — `mv doing→done` 이 곧 "완료"의 정의(보고 전 Step 7-V 검증 필수). 커밋 성공 직후 `committed:` 해시 마커 기록 → mv 누락돼도 다음 run이 재실행 없이 done/ 으로 화해. doing/ 잔류는 어떤 분기에서도 금지(성공=done, 실패=blocked)
+17. **add 등록 백그라운드화 + 세션 운용 전제** — add의 등록 Agent는 `run_in_background` 스폰 후 턴 즉시 종료(큐·다중 세션 add 병렬 처리). TASK_ID 선발급(Step 0-F)으로 FIFO 보존, ready 게이트 + 30분 고아 sweep이 미완성 보호. 운용 전제: **run은 항상 단일 세션, add는 다중 세션 허용**
 
 ---
 

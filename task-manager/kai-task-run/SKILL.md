@@ -199,19 +199,36 @@ echo "$output"
 
 > **Codex 리스크 분석은 Step 2가 이미 완료했다.** 스폰 시점엔 `.plans/{f}.codex.md` 가 (codex 가용·tier≥2 시) 이미 디스크에 있다. 여기서는 **이번에 새로 선점한 `SPAWN`의 워커만** 띄운다 — 이미 도는 `INFLIGHT` 워커는 그대로 둔다. (codex 미설치·저tier면 `.codex.md` 가 없을 뿐, 워커는 정상 진행)
 
-`SPAWN` 이 비어있으면(Step 2에서 `NONE` + `INFLIGHT` 있음) 스폰 없이 Step 5로 간다. 아니면 `SPAWN`의 각 task에 대해 **하나의 응답에서 Agent를 동시 호출**한다:
+`SPAWN` 이 비어있으면(Step 2에서 `NONE` + `INFLIGHT` 있음) 스폰 없이 Step 5로 간다.
+
+**스폰 직전 tier 확인 (Bash 한 줄 · SPAWN 전체 일괄):**
+
+```bash
+for f in {SPAWN 목록}; do
+  t=$(awk '/^---$/{c++;next} c==1 && /^tier:/{gsub(/[^0-9]/,"",$2); print $2; exit}' "{SESSION_ROOT}/docs/tasks/doing/$f")
+  echo "TIER:$f=${t:-1}"
+done
+```
+
+아니면 `SPAWN`의 각 task에 대해 **하나의 응답에서 Agent를 동시 호출**한다:
 
 ```
 # SPAWN의 각 f에 대해 동시에 (parallel):
 Agent({
   subagent_type: "kai-task-worker",
   run_in_background: true,
+  model: {tier가 3이면 "opus", 아니면 생략(세션 모델 상속)},
   prompt: """
 SESSION_ROOT: {SESSION_ROOT}
 CLAIMED_FILE: {SESSION_ROOT}/docs/tasks/doing/{f}
   """
 })
 ```
+
+> 🎯 **Tier 3 워커 모델 승격**: 기획(add·advisor)이 아무리 좋아도 **구현 자체가 난제인 부류**
+> (미묘한 동시성·까다로운 알고리즘·구현 중 판단이 계속 필요한 새 기능)는 워커의 추론력이 품질을 좌우한다.
+> tier 3 은 워커를 `model: "opus"` 로 스폰하고, tier 1·2 는 model 을 생략해 세션 모델(경량)을 상속한다.
+> tier 파싱 실패(빈 값·비숫자)는 1로 간주 → 생략.
 
 > 워커 지침은 `~/.claude/agents/kai-task-worker.md` 에서 자동 로드됨.
 > PROJECT_ROOT는 워커가 CLAIMED_FILE의 impact_files에서 직접 결정한다.
