@@ -21,7 +21,9 @@ PLANDIR="$TASKS/.plans"
 mkdir -p "$TODO" "$DOING" "$DONE" "$BLOCKED" "$TASKS/.staging" "$PLANDIR"
 
 # done IDs (predecessors 검사용 — '--' 이전 prefix만 추출)
-done_ids=$(ls "$DONE/" 2>/dev/null | sed 's/--.*//' || true)
+# done/ 최상위 + done/archive/ 모두 포함 — 아카이브된 완료 작업도 predecessor로 인정해야 함
+# (아카이브 후 predecessor 미인식으로 후속 task가 영원히 선점되지 않는 버그 방지)
+done_ids=$( { ls "$DONE/" 2>/dev/null; ls "$DONE/archive/" 2>/dev/null; } | sed 's/--.*//' )
 
 # doing/ 에서 잠긴 파일 목록 + 점유 슬롯 수 수집
 locked_files=""
@@ -29,7 +31,7 @@ doing_count=0
 for df in "$DOING"/*.md; do
   [ -e "$df" ] || continue
   doing_count=$((doing_count + 1))
-  files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$df")
+  files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/[[:space:]]*#.*$/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$df")
   locked_files="$locked_files $files"
 done
 
@@ -58,7 +60,7 @@ for tf in $(ls "$TODO"/*.md 2>/dev/null | sort); do
   [ "$ready" = "true" ] || continue
 
   # ① 선행조건 — predecessors 모두 done에 있어야 함
-  preds=$(awk '/^---$/{c++; next} c==1 && /^predecessors:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
+  preds=$(awk '/^---$/{c++; next} c==1 && /^predecessors:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/[[:space:]]*#.*$/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
   ok=1
   for pred in $preds; do
     echo "$done_ids" | grep -qF "$pred" || { ok=0; break; }
@@ -66,7 +68,7 @@ for tf in $(ls "$TODO"/*.md 2>/dev/null | sort); do
   [ "$ok" -eq 1 ] || continue
 
   # ② impact_files 추출
-  candidate_files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
+  candidate_files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/[[:space:]]*#.*$/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
   if [ -z "$candidate_files" ]; then
     mv "$tf" "$BLOCKED/$f" 2>/dev/null || true
     continue
@@ -135,7 +137,7 @@ if [ -x "$HELPER" ]; then
       [ -z "$a" ] && continue
       [ -z "$first" ] && first="$a"
       abs="${abs}${a}"$'\n'
-    done < <(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
+    done < <(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/[[:space:]]*#.*$/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
 
     [ -z "$first" ] && continue
     ROOT=$(cd "$(dirname "$first")" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || continue
