@@ -80,7 +80,8 @@ Skills/                           ← 본 repo 루트
 7. **predecessors 선행조건** — claim 전 선행 id가 모두 `done/`에 있어야 착수
 8. **좀비/고아 자동 복구 + 완료 화해** — doing/ 의 `committed:` 마커 있으면 곧장 done/ 으로 화해(재실행 금지), 없고 30분 경과면 todo/ 복귀, `.staging/` 고아 청소
 9. **워크트리 절대 금지** — 과거 사고 재발 방지 (Red Lines)
-10. **Tier 분류 (1/2/3)** — Tier 3 advisor(Opus) 자문은 **add 전용**(등록 시 구현방안·impact_files 확정 — 충돌 게이트 입력은 claim 이전에 완성돼야 함). run은 advisor를 호출하지 않으며 tier≥2 Codex 리스크 분석만 수행. **Tier 3 워커는 `model: "opus"` 로 스폰**(구현 자체가 난제인 부류의 탈출구), tier 1·2 워커는 세션 모델(경량) 상속
+10. **Tier 분류 (1/2/3)** — Tier 3 advisor(Opus) 자문은 **add 전용**(등록 시 구현방안·impact_files 확정 — 충돌 게이트 입력은 claim 이전에 완성돼야 함). **Tier 3 워커는 `model: "opus"` 로 스폰**(구현 자체가 난제인 부류의 탈출구), tier 1·2 워커는 세션 모델(경량) 상속. 워커 3.7 advisor 게이트는 `advisor: done` + 스펙-코드 일치 시 재호출 생략(중복 자문 방지)
+10-b. **kai-gen MCP 교차 검증 (bash Codex CLI 대체)** — 리스크 분석은 bash CLI·`.plans/` 중간 파일 없이 **LLM이 `mcp__kai-gen__kai_consult` 를 직접 호출**: add 등록 에이전트는 Tier 3 스펙(`· 등록` 섹션)을, run 워커는 tier≥2 구현 플랜(`· 구현` 섹션)을 반박 우선 검증(단일 호출·4부 압축 context·최대 10분 허용·거절한 치명 지적도 기록). 실패는 기록 후 자체 플랜 진행(soft-fail), 성공 기록만 멱등 skip. claim 스크립트는 순수 파일 연산으로 복귀(Step 2 블로킹 해소)
 11. **아카이브 일원화** — 완료 정리는 **task-run에서만**(`[x]` 생산 주체가 run). add에서 제거
 12. **레거시 자동 마이그레이션** — add/run Step 0에서 기존 `check-list.md` → `tasks/` 1회 변환
 13. **컨텍스트 절감** — 본문 통째 읽기 금지, frontmatter만 `awk '/^---$/{c++;next}c==1'` 추출

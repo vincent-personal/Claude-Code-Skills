@@ -29,12 +29,12 @@ PROJECT_ROOT=$(cd "$(dirname "$FIRST_FILE")" && git rev-parse --show-toplevel 2>
 
 ---
 
-## W-0.5 — Codex 플랜은 **메인 세션이 띄우고 완료까지 대기**한다 (워커는 안 띄움/안 기다림)
+## W-0.5 — 리스크 분석은 **워커 자신이** kai-gen MCP로 수행한다 (bash CLI·중간 파일 없음)
 
-> tier≥2 + codex 가용 시, **메인 세션(Step 2)** 이 `codex-plan.sh` 를 띄우고 `wait` 로 **codex 완료까지 블록**한 뒤
-> 워커를 스폰한다. 즉 **워커가 시작될 땐 `{SESSION_ROOT}/docs/tasks/.plans/{CLAIMED}.codex.md` 가 이미 있다**(성공 시).
-> **워커는 launch도 대기도 하지 않는다** — W-1에서 그 결과 파일을 *참조만* 한다.
-> (launch·대기를 워커에 두면 AI가 부가단계로 보고 건너뛰므로 결정론적 메인 루프로 이관함. 기록도 메인 Step 5가 담당.)
+> 이 브랜치는 Codex CLI(bash launch+wait)·`.plans/` 중간 파일을 쓰지 않는다.
+> tier≥2 작업의 적대적 리스크 분석은 **워커가 W-1 step 3.5에서 `mcp__kai-gen__kai_consult`
+> 도구를 직접 1회 호출**하여 자기 컨텍스트로 받는다. 메인 세션은 아무것도 띄우지 않는다.
+> 호출·완료·실패가 전부 워커 제어 하에 있으므로 별도 폴링·첨부 파이프라인이 필요 없다.
 
 ---
 
@@ -54,22 +54,49 @@ PROJECT_ROOT=$(cd "$(dirname "$FIRST_FILE")" && git rev-parse --show-toplevel 2>
    - ③ 현재 구현이 템플릿과 어긋나면 **"보존"이 아니라 템플릿 기준으로 전면 재현(불일치 시 재작성)** 한다. 화면 작업(`screen_work`)이면 W-2 이후 Playwright로 템플릿 대비 검증한다.
 
 3. **자체 구현 방안 수립** — 위 Read 결과를 근거로 *먼저 너의 플랜을 독립적으로* 정한다.
-   (Codex 리스크 분석을 보기 전에 수립 — 앵커링 방지)
+   (kai-gen 교차 검증을 받기 전에 수립 — 앵커링 방지)
 
-3.5. **Codex 리스크 분석 종합** — **대기하지 마라.** 메인 세션(Step 2)이 codex 완료까지 `wait`로 블록한 뒤 너를 스폰했으므로, 결과가 있으면 이미 디스크에 있다. 곧장 1회 확인한다:
-   ```bash
-   PLAN="{SESSION_ROOT}/docs/tasks/.plans/{CLAIMED}.codex.md"
-   [ -f "$PLAN" ] && echo EXISTS || echo NONE
-   ```
-   - **EXISTS** → Read. codex 는 '2차 구현안'이 아니라 **적대적 리뷰어**로서 이 task의 치명적 위험·놓치기 쉬운 엣지케이스·완전히 다른 접근·검증 포인트를 짚는다. 이것을 너의 자체 플랜(step 3)과 **대조하여 네가 놓친 맹점을 메운다.** 유효한 지적은 반영하되, **실제 코드·프로젝트 컨벤션과 모순되거나 오탐인 부분은 무시**한다. **최종 판단은 너(Claude)**.
-   - **NONE** → (저tier/codex 미사용/실패) 자체 플랜으로 진행. 막지 않는다.
-   - ❗ `sleep`/대기 루프 금지 — 메인이 이미 기다렸다. 단순 존재확인 후 즉시 진행.
-   - ※ `.plans/` 파일 첨부·삭제는 메인 Step 5가 한다 — 건드리지 않는다.
+3.5. **kai-gen 교차 검증 (tier≥2 필수 · 단일 호출)** — 자체 플랜(step 3) 수립 **후에** 타 계열 모델에게 반박 우선 검증을 받는다:
 
-3.7. **불분명·고위험 시 Opus advisor 게이트 (필수)** — 다음 중 하나라도 해당하면, **구현 착수 전** `advisor` 서브에이전트(Opus, `Agent(subagent_type:"advisor")`)를 호출하여 5섹션 자문을 받는다:
+   **a. 멱등 가드 (성공 기록만 skip)** — CLAIMED_FILE 본문의 `## 교차 검증 (kai-gen · 구현)` 섹션을 확인:
+   - 섹션에 `- 모델:` 줄이 있음(=과거 검증 성공) → **이 단계 전체 skip** (재선점 시 중복 호출 방지).
+   - 섹션이 `미가용` 기록임 → **재시도 대상** — c로 진행하고, 성공 시 그 섹션을 Edit로 교체 (일시 장애가 영구 검증 생략으로 굳는 것 방지).
+   - 섹션 없음 → c로 진행. tier<2 는 무조건 skip.
+
+   **b. 도구 로드 + mtime 갱신** — ToolSearch 1회: `select:mcp__kai-gen__kai_consult` (안 보이면 → c' 실패 경로).
+   `touch "{CLAIMED_FILE}"` 실행 — 장시간 호출 중 다음 run 진입의 30분 좀비 판정에 걸리지 않게 mtime을 갱신해 둔다.
+
+   **c. 호출 (1회, kai_continue 금지, kai_status 생략):**
+   - `context` = 아래 4부 구성. **파일 원문 통째 덤프 금지** — 과대 컨텍스트는 호출 abort의 원흉. (상대는 로컬 파일을 읽을 수 없다 — 코드 근거는 네가 발췌해서 줘야 한다.)
+     1. **task 원문 요약** — 작업 설명·요구사항 (frontmatter title·tier·impact_files 경로 포함)
+     2. **코드에서 확인된 사실** — step 2에서 실제로 읽은 impact_files의 관련 구조·호출 관계·핵심 발췌 (합계 ~80줄 이내)
+     3. **자체 플랜** — 요약 10~20줄 + 구현 체크리스트
+     4. **불확실 지점** — 네가 확신하지 못하는 부분 명시
+   - `question` = "위 자료는 다른 AI(Claude)가 곧 실행할 구현 플랜이다. 동의하려 하지 말고 먼저 반박을 시도하라. 특히 **플랜이 누락한 파일·호출 트리거(배선)·실패 경로**를 찾아라. 치명적 위험·엣지케이스·더 단순한 대안을 구체적 근거와 함께 지적하고, 반박에 실패한 지점만 '검증됨'으로 표시하라. 이 task에 특정한 위험만 짚고 일반론은 쓰지 마라."
+   - `effort` = "medium".
+   - ⏱ **호출은 최대 10분까지 걸릴 수 있다 — 정상이다.** 백그라운드 태스크로 전환되면 그 결과 알림을 기다린다. 조급한 중복 호출 금지.
+   - 응답 수신 → 상대는 '2차 구현안'이 아니라 **적대적 리뷰어**다. 유효한 지적만 자체 플랜에 반영하고, **실제 코드·프로젝트 컨벤션과 모순되거나 오탐인 부분은 무시**한다. **최종 판단은 너(Claude)**.
+   - 기록: CLAIMED_FILE 본문 끝에 Edit로 append (거절한 치명 지적은 반드시 남긴다 — 자기검증 방지):
+     ```markdown
+     ## 교차 검증 (kai-gen · 구현)
+     - 모델: {usedModel}
+     - 수용: {수용한 지적 2~3줄 요약. 없으면 "지적 없음 — 원플랜 유지"}
+     - 거절: {거절한 치명(critical) 지적 + 거절 사유 1~2줄. 없으면 생략}
+     ```
+
+   **c'. 실패 경로 (도구 부재·호출 에러·abort)** — 1회만 재시도(context를 더 압축). 그래도 실패면 **조용히 넘어가지 말고** 본문에 append 후 자체 플랜으로 즉시 진행:
+     ```markdown
+     ## 교차 검증 (kai-gen · 구현)
+     - kai-gen 미가용({사유 한 줄}) — 자체 플랜으로 진행
+     ```
+   ※ 등록(add) 단계의 `## 교차 검증 (kai-gen · 등록)` 섹션과 별개다 — 등록 검증은 **스펙**(scope·impact_files·배선)을, 이 검증은 **구현 플랜**(실제 코드 대비·실패 경로)을 본다. 등록 섹션이 있어도 이 단계는 수행한다.
+
+3.7. **불분명·고위험 시 Opus advisor 게이트** — 다음 중 하나라도 해당하면, **구현 착수 전** `advisor` 서브에이전트(Opus, `Agent(subagent_type:"advisor")`)를 호출하여 5섹션 자문을 받는다:
    - 작업 설명·지침서에 **조금이라도 불분명·모호한 지점**이 있다 (데이터를 어디서 채우는지·배선 호출 트리거, 필드 출처, 상태 전이, 누가 호출하는지 등).
    - 새 기능 · 리팩토링 · 외부 통합 · DB 스키마 변경 · 인증/결제/보안 작업.
-   - 자체 플랜(step 3)과 codex 지적(3.5)이 충돌하여 판단이 서지 않는다.
+   - 자체 플랜(step 3)과 kai-gen 지적(3.5)이 충돌하여 판단이 서지 않는다.
+
+   ⚠️ **중복 자문 방지**: frontmatter `advisor: done`(add 등록 시 이미 Opus 자문 완료)이고, step 2에서 확인한 **실제 코드가 등록 스펙(구현 방안)과 일치**하면 advisor를 재호출하지 않는다. 재호출은 위 조건 중 "스펙과 실제 코드의 불일치" 또는 "판단 충돌"이 실제로 발생했을 때만.
 
    처리 원칙:
    - advisor 응답 **§5 🔴(지금 반드시)** 항목은 **하나도 빠짐없이 반영**한 뒤 구현한다 — 빠짐·오류 0이 목표.
@@ -164,7 +191,7 @@ HASH=$(cd {PROJECT_ROOT} && git rev-parse --short HEAD)
 
 1. CLAIMED_FILE frontmatter에 `committed: {HASH}` 추가 (Edit)
 2. CLAIMED_FILE 본문 끝에 완료 기록 추가
-   ※ Codex 플랜의 done 첨부·`.plans/` 정리는 **메인 세션(Step 5)** 이 담당 — 워커는 건드리지 않는다.
+   ※ 교차 검증 기록(`## 교차 검증 (kai-gen · 구현)`)은 W-1 3.5에서 이미 본문에 적었다 — 별도 첨부 단계 없음.
 3. mv doing → done:
 ```bash
 mv "{CLAIMED_FILE}" "{SESSION_ROOT}/docs/tasks/done/$(basename {CLAIMED_FILE})"
@@ -183,8 +210,9 @@ mv "{CLAIMED_FILE}" "{SESSION_ROOT}/docs/tasks/done/$(basename {CLAIMED_FILE})"
 - ❌ doing/ 에 작업 남긴 채 종료 — 반드시 done/ 또는 blocked/
 - ❌ `git worktree add` / PROJECT_ROOT 외부 파일 수정
 - ❌ build.lock 무시하고 동시 빌드
-- ❌ 워커가 `codex-plan.sh` 를 직접 띄움 — launch는 **메인 세션(Step 2)** 담당. 워커는 W-1에서 참조만.
-- ❌ 워커가 codex 완료를 `sleep`/폴링 대기 — 대기는 메인 Step 2가 `wait`로 끝냄. 워커는 `.codex.md` **존재확인 1회 후 즉시** 진행 (있으면 종합, 없으면 자체)
-- ❌ Codex 플랜을 검증 없이 그대로 따름 — 코드·컨벤션 기준 최종 판단은 워커(Claude)
-- ❌ 워커가 `.plans/` 파일을 첨부·삭제 — done 첨부·정리는 **메인 세션(Step 5)** 담당
-- ❌ `.plans/` 산출물을 커밋에 포함 — `git add`는 impact_files만
+- ❌ `codex-plan.sh` 실행 / `.plans/` 파일 생성·참조 — 이 브랜치는 Codex CLI 경로를 쓰지 않는다 (리스크 분석 = W-1 3.5 kai_consult)
+- ❌ kai_consult 응답을 검증 없이 그대로 따름 — 코드·컨벤션 기준 최종 판단은 워커(Claude)
+- ❌ kai_consult 다중 호출·`kai_continue` 토론 — 단일 호출, 실패 시 재시도 1회가 상한
+- ❌ 검증 실패를 기록 없이 통과 — 미가용도 반드시 `## 교차 검증 (kai-gen · 구현)` 섹션에 명시
+- ❌ 장시간 호출 중 조급한 중복 호출 — 백그라운드 전환 시 결과 알림을 기다린다 (최대 10분 정상)
+- ❌ task .md(교차 검증 섹션 포함)를 프로젝트 커밋에 포함 — `git add`는 impact_files만

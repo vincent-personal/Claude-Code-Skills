@@ -1,4 +1,7 @@
 #!/bin/bash
+# ⚠️ NOTE(feat/task-mcp-crossverify): 레거시 전환기 전용 — 이 브랜치는 새 .codex.md 를
+#   생성하지 않는다(교차 검증은 워커가 kai_consult로 수행·본문 직접 기록). 구 파이프라인이
+#   남긴 .plans 고아만 종결하며, 고아 소진 후엔 완전 no-op. 잔존 확인 후 제거 후보.
 # task-finalize-codex.sh — Codex 리스크 분석의 종결(본문 첨부 + .plans 청소)을 멱등 복구
 #
 # 두 호출자가 이 하나의 로직을 공유한다(DRY — 첨부 포맷 드리프트 방지):

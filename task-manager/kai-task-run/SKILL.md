@@ -34,18 +34,19 @@ allowed-tools:
 메인 세션 (얇은 루프 · 컨텍스트 최소 · 슬롯 리필)
   ┌─ Step 0-A: 잠금확인 + 좀비복구 + finalize sweep + todo확인 [단일 Bash]  ← 진입 1회
   │  ── 리필 루프 (INFLIGHT = 도는 워커 목록을 메인 세션이 유지) ──
-  │  Step 2:   가용 슬롯만큼 선점(available = N − 도는 워커 수) + Codex launch+wait  [한 Bash]
+  │  Step 2:   가용 슬롯만큼 선점(available = N − 도는 워커 수)  [한 Bash · <수초, 블로킹 없음]
   │  Step 4:   이번에 새로 선점한 것만 스폰
-  │  Step 5:   INFLIGHT 중 하나라도 완료 시 반환(빈 슬롯 리필 신호) + Codex 첨부  [한 Bash]
+  │  Step 5:   INFLIGHT 중 하나라도 완료 시 반환(빈 슬롯 리필 신호)  [한 Bash]
   └─ Step 6:   완료분 보고 → Step 2로 (슬롯 재충전). INFLIGHT 비고 Step2 NONE이면 종료
 
 백그라운드 워커 (작업 1개 완수 후 조용히 종료)
   W-0:   작업 파일 Read + PROJECT_ROOT 결정
-  W-1:   컨벤션 Read + 자체 플랜 + (메인이 띄운)Codex 플랜 참조·종합 + 코드 구현
+  W-1:   컨벤션 Read + 자체 플랜 + (tier≥2) kai-gen MCP 교차 검증 + 코드 구현
   W-2:   빌드 검증
   W-3:   git add → pull --rebase → commit → push
-  W-4:   committed: 마커 + mv doing→done   (Codex 분석 첨부는 메인 Step 5)
-  ※ Agent() 재호출 없음 — 체인 없음 (codex는 CLI라 Bash 호출 = 체인 아님)
+  W-4:   committed: 마커 + mv doing→done
+  ※ Agent() 재호출 없음 — 체인 없음 (kai_consult는 MCP 도구 호출 = 체인 아님)
+  ※ 리스크 분석은 워커가 W-1에서 mcp__kai-gen__kai_consult 로 직접 수행 — bash CLI·.plans 중간 파일 없음
 ```
 
 **핵심 설계 원칙:**
@@ -83,7 +84,7 @@ allowed-tools:
 mkdir -p "{SESSION_ROOT}/docs/tasks"/{todo,doing,done,blocked,.staging,.plans}
 ```
 
-> `.plans/` — tier≥2 task의 Codex 리스크분석(`*.codex.md`)을 임시 저장하는 공간 (Step 2 선점 Bash가 생성, codex 가용 시에만). 워커 구현 후 Step 5(폴링 종료 직후) 또는 **다음 run의 Step 0-A finalize sweep**이 분석을 done 본문에 첨부하고 원본을 삭제한다 → `.plans/`는 비워진다. poll을 못 거친 고아도 다음 run 진입 시 sweep이 복구하며, prompt.txt만 남은 잔여는 60분 GC가 backstop.
+> `.plans/` — **(레거시 · 전환기)** 구 Codex CLI 파이프라인의 잔존 산출물 공간. 이 브랜치는 새 `.codex.md` 를 **생성하지 않는다** (리스크 분석은 워커가 kai_consult로 직접 수행·기록). 과거 run이 남긴 고아만 Step 0-A finalize sweep이 done 본문에 첨부 후 삭제하며, `.plans/` 가 비면 이 경로는 완전 no-op이다.
 
 ---
 
@@ -119,12 +120,9 @@ if ls "{SESSION_ROOT}"/docs/tasks/doing/*.md 2>/dev/null | grep -q .; then
   done
 fi
 
-# Codex 분석 종결 sweep — poll(Step 5)을 못 거친 .plans 고아를 loop 시작 시 복구한다.
-#   done/archive면 (미첨부 시) Codex 분석을 done 본문에 첨부 후 삭제, blocked면 삭제,
-#   todo/doing(진행중)이면 건드리지 않음. poll(Step 5)과 같은 헬퍼를 공유(첨부 포맷 단일화).
-#   위 화해 경로가 done으로 옮긴 것도 여기서 첨부된다(그래서 화해가 .plans를 지우지 않았다).
-#   ※ 완전 예방이 아니라 다음 run 진입 시 자동 복구다 — 현재 run이 또 끊기면 새 고아가
-#     생기고 다음 run sweep이 걷어낸다.
+# (레거시·전환기) Codex 분석 종결 sweep — 구 파이프라인이 남긴 .plans 고아만 종결한다.
+#   이 브랜치는 새 .codex.md 를 생성하지 않으므로, 잔존 고아가 소진되면 이 블록은 완전 no-op.
+#   done/archive면 (미첨부 시) 본문에 첨부 후 삭제, blocked면 삭제, todo/doing이면 불간섭.
 FINALIZE="$HOME/.claude/tools/task-finalize-codex.sh"
 [ -x "$FINALIZE" ] && bash "$FINALIZE" "{SESSION_ROOT}"
 
@@ -167,12 +165,10 @@ echo "remaining=$remaining"
 
 ---
 
-### Step 2 — 슬롯 채우기 (가용 슬롯만큼 선점) + Codex 리스크 분석
+### Step 2 — 슬롯 채우기 (가용 슬롯만큼 선점)
 
-> **모든 로직은 `task-claim-and-plan.sh` 가 수행한다** — FIFO 선정·슬롯 인식(가용 = N − 도는 워커 수)·mv 선점·Codex launch+wait 를 하나의 실행 파일에 담아, LLM이 단계를 쪼개거나 건너뛸 수 없게 한다.
+> **모든 로직은 `task-claim-and-plan.sh` 가 수행한다** — FIFO 선정·슬롯 인식(가용 = N − 도는 워커 수)·mv 선점을 하나의 실행 파일에 담아, LLM이 단계를 쪼개거나 건너뛸 수 없게 한다. **순수 파일시스템 연산이라 수 초 내 반환된다** (구 Codex launch+wait 블록은 제거됨 — 리스크 분석은 워커가 kai_consult로 직접 수행).
 > `task-claim-and-plan.sh` 미설치 시 `[ -x ]` 가 false → 전체 skip (원래 동작).
->
-> ⚠️ **이 Bash 호출은 `timeout: 600000`(10분) 으로 실행한다** — Codex 가 수십 초~수 분 걸릴 수 있어 기본 2분에 끊기지 않게 한다.
 
 ```bash
 # 리필 루프 매 회전 시작: 사용자 잠금 확인 (Step 0-A는 진입 1회이므로 여기서 반응)
@@ -189,7 +185,6 @@ echo "$output"
 - `NONE`:
   - `INFLIGHT` 가 **비었으면** → `"✅ 모든 작업 완료."` 출력 후 **종료**.
   - `INFLIGHT` 가 **있으면**(도는 워커 존재) → 이번엔 `SPAWN` 없이 곧장 **Step 5(대기)로**. (파일 충돌·슬롯이 풀리면 다음 회전에 선점된다 — 충돌·기아 해소)
-- `CODEX:<n>` → 로그 출력 (`n`건 Codex 완료)
 
 ---
 
@@ -197,7 +192,7 @@ echo "$output"
 
 ### Step 4 — 이번 회전 스폰 (새로 선점한 것만)
 
-> **Codex 리스크 분석은 Step 2가 이미 완료했다.** 스폰 시점엔 `.plans/{f}.codex.md` 가 (codex 가용·tier≥2 시) 이미 디스크에 있다. 여기서는 **이번에 새로 선점한 `SPAWN`의 워커만** 띄운다 — 이미 도는 `INFLIGHT` 워커는 그대로 둔다. (codex 미설치·저tier면 `.codex.md` 가 없을 뿐, 워커는 정상 진행)
+> 여기서는 **이번에 새로 선점한 `SPAWN`의 워커만** 띄운다 — 이미 도는 `INFLIGHT` 워커는 그대로 둔다. 리스크 분석은 각 워커가 착수 후 스스로 수행하므로(W-1 3.5 kai_consult) 스폰 전에 기다릴 것이 없다.
 
 `SPAWN` 이 비어있으면(Step 2에서 `NONE` + `INFLIGHT` 있음) 스폰 없이 Step 5로 간다.
 
@@ -232,15 +227,15 @@ CLAIMED_FILE: {SESSION_ROOT}/docs/tasks/doing/{f}
 
 > 워커 지침은 `~/.claude/agents/kai-task-worker.md` 에서 자동 로드됨.
 > PROJECT_ROOT는 워커가 CLAIMED_FILE의 impact_files에서 직접 결정한다.
-> Codex 리스크분석(Step 2 선점 Bash에서 띄움·대기 완료)은 워커 W-1이 `.plans/{f}.codex.md` 로 참조한다.
+> tier≥2 리스크 분석(kai-gen 교차 검증)은 워커 W-1 3.5가 직접 수행·기록한다.
 
 모든 Agent 호출 후 즉시 Step 5로 이동. 워커 반환값을 기다리지 않는다.
 
 ---
 
-### Step 5 — 하나라도 완료될 때까지 대기 (슬롯 리필) + Codex 첨부
+### Step 5 — 하나라도 완료될 때까지 대기 (슬롯 리필)
 
-> **`task-poll-and-attach.sh` 가 `INFLIGHT` 중 하나라도 종료되면 즉시 반환**한다(빈 슬롯 리필 신호). 진행중은 `RUNNING`. timeout 처리(MAX 1시간 동안 아무도 안 끝남)·Codex 첨부도 이 스크립트가 수행하므로, 첨부 단계를 건너뛸 수 없다.
+> **`task-poll-and-attach.sh` 가 `INFLIGHT` 중 하나라도 종료되면 즉시 반환**한다(빈 슬롯 리필 신호). 진행중은 `RUNNING`. timeout 처리(MAX 1시간 동안 아무도 안 끝남)도 이 스크립트가 수행한다. (레거시 `.plans` 첨부 로직은 파일이 없으면 no-op.)
 >
 > ⚠️ **이 Bash 호출은 `timeout: 3660000`(61분) 으로 실행한다** — 폴링 MAX(3600초) + 여유 시간.
 
@@ -253,7 +248,7 @@ echo "$output"
 - `DONE:<f>` / `BLOCKED:<f>` → **`INFLIGHT` 에서 제거** + Step 6 보고에 누적.
 - `RUNNING:<f>` → `INFLIGHT` 유지(아직 도는 중 — 다음 회전 Step 5에 다시 넘어간다).
 
-> 종결(첨부+청소)은 `task-finalize-codex.sh` 가 수행한다(Step 0-A sweep과 공유). done/archive면 미첨부 시 Codex 분석을 본문에 첨부 후 삭제, blocked면 삭제한다. poll을 못 거친 고아(세션 중단 등)는 다음 run **Step 0-A finalize sweep**이 복구하고, codex 실패로 prompt.txt만 남은 잔여는 60분 GC가 backstop 처리한다.
+> **(레거시 · 전환기)** 구 Codex 파이프라인이 남긴 `.plans` 고아만 `task-finalize-codex.sh` 가 종결한다(Step 0-A sweep과 공유·파일 없으면 no-op). 이 브랜치의 교차 검증 기록은 워커가 task 본문에 직접 쓰므로 첨부 단계가 필요 없다.
 
 ---
 
@@ -311,10 +306,10 @@ PROJECT_ROOT=$(cd "$(dirname "$FIRST_FILE")" && git rev-parse --show-toplevel 2>
 
 ---
 
-### W-0.5 — Codex 플랜은 **메인 세션(Step 2)이 띄운다** (워커는 안 띄움)
+### W-0.5 — 리스크 분석은 워커 자신이 kai-gen MCP로 수행한다
 
-워커는 Codex 플랜을 **띄우지 않는다**. tier≥2+codex 가용 시 메인 세션이 Step 2에서 백그라운드로 띄워 `docs/tasks/.plans/{{CLAIMED}}.codex.md` 를 생성하고, 첨부·정리는 Step 5가 한다. 워커는 W-1에서 그 파일을 **참조만** 한다.
-> **권위 정의는 `~/.claude/agents/kai-task-worker.md` 의 W-1(3·3.5)** 를 따른다 (~90초 대기·종합 규칙). 상충 시 에이전트 파일 우선.
+bash CLI(codex)·`.plans/` 중간 파일 없음. tier≥2면 워커가 W-1에서 자체 플랜 수립 후 `mcp__kai-gen__kai_consult` 를 **직접 1회 호출**해 반박 우선 검증을 받고, 결과 요약을 task 본문 `## 교차 검증 (kai-gen · 구현)` 섹션에 기록한다.
+> **권위 정의는 `~/.claude/agents/kai-task-worker.md` 의 W-1(3·3.5)** 를 따른다 (멱등 가드·4부 압축 context·10분 허용·실패 시 기록 후 진행). 상충 시 에이전트 파일 우선.
 
 ---
 
@@ -328,11 +323,13 @@ PROJECT_ROOT=$(cd "$(dirname "$FIRST_FILE")" && git rev-parse --show-toplevel 2>
 2. impact_files Read — task 설명과 실제 파일 상태 비교·재해석
    (A→C인데 실제 파일이 B면 B→C로 구현; 재해석 불가 → `mv doing→blocked` + "BLOCKED: 시점불일치" 후 종료)
 
-3. 새 파일 생성 시 impact_files에 append(Edit)
+3. **자체 플랜 수립 → (tier≥2) kai-gen 교차 검증** — kai-task-worker.md W-1 3·3.5 규칙대로: 플랜을 먼저 독립 수립(앵커링 방지) 후 kai_consult 1회, 유효 지적만 반영·기록.
 
-4. 구현 체크리스트 있으면 순회: `- [ ]` 구현 → `- [x]` Edit → 반복. 없으면 일괄 구현.
+4. 새 파일 생성 시 impact_files에 append(Edit)
 
-5. 막히면 80% 가능 시 자체 판단; 완전 불가 → `mv doing→blocked` + "BLOCKED: {사유}" 후 종료.
+5. 구현 체크리스트 있으면 순회: `- [ ]` 구현 → `- [x]` Edit → 반복. 없으면 일괄 구현.
+
+6. 막히면 80% 가능 시 자체 판단; 완전 불가 → `mv doing→blocked` + "BLOCKED: {사유}" 후 종료.
 
 ---
 

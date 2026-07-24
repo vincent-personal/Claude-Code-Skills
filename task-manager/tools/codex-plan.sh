@@ -1,4 +1,6 @@
 #!/bin/bash
+# ⚠️ NOTE(feat/task-mcp-crossverify): 이 브랜치에서 미사용(inert) — 리스크 분석은
+#   워커가 kai-gen MCP(kai_consult)로 직접 수행한다. main 병합 판단 전까지 보존.
 # codex-plan.sh — Codex 비대화형 구현 플랜 생성
 # Usage: codex-plan.sh <PROJECT_ROOT> <PROMPT_FILE> <OUTPUT_FILE>
 #
