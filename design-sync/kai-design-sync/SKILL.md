@@ -48,6 +48,9 @@ allowed-tools:
 ```
 → unlayered CSS는 PrimeNG의 `primeng` layer보다 항상 우선하므로, 높은 신뢰도로 적용된다. sm/lg variant는 각자의 CSS 변수(--p-button-sm-font-size 등)로 이미 제어되므로 `:not()` 로 제외한다.
 
+**핵심 원칙 5 — 이중 구현 비교 + 전수 진열 + 칩 주소 체계:** Playground의 모든 데모 셀은 **Tailwind 구현과 PrimeNG 구현을 나란히** 넣어 비교 가능해야 하고(한쪽 생략 금지), 컴포넌트 인벤토리(Step 2)는 **레퍼런스뿐 아니라 타겟 코드베이스의 기존 컴포넌트 유닛까지 전수 검색**하여 최대한 모두 진열한다. 각 데모 셀에는 유니크 ID 칩(`pg://{섹션}/{슬러그}`, 클릭=복사)을 붙여 사람↔AI 디자인 지정의 공용 언어로 쓴다.
+→ 방법론 상세(공유 컴포넌트 추출·API 컨벤션·오버레이 래퍼·p-table 방식·칩 시스템·운영 규칙)는 **`references/shared-ui-playbook.md`를 반드시 읽고 따른다** (churchon-console 실물 기반 플레이북).
+
 ---
 
 ## ⚡ 실행 절차
@@ -236,12 +239,25 @@ mkdir -p {TARGET}/docs/.design-sync
 
 ---
 
-### Step 2 — UI 컴포넌트 인벤토리
+### Step 2 — UI 컴포넌트 인벤토리 (전수 검색)
 
 레퍼런스에서 사용 중인 UI 컴포넌트를 카테고리별로 목록화한다.
+**목표는 "최대한 모든 컴포넌트 유닛"이다 — 빈도로 걸러 버리지 않는다.**
 
 **HTML 파일 분석 시:** 클래스명 패턴으로 컴포넌트 유추
 **프로젝트 분석 시:** PrimeNG/커스텀 셀렉터 Grep
+
+**2-A. 타겟 코드베이스 전수 스캔 (필수 추가):**
+레퍼런스와 별개로, **타겟 프로젝트에 이미 존재하는 컴포넌트 유닛도 전수 검색**하여 인벤토리에 합친다:
+```bash
+# 커스텀 컴포넌트 셀렉터 전수 (app-* 등 프로젝트 프리픽스)
+grep -rho "selector: *['\"]\(app\|ui\)-[a-z-]*['\"]" {TARGET}/src --include="*.ts" | sort -u
+# 사용 중인 PrimeNG 컴포넌트 전수
+grep -rho "<p-[a-z-]*" {TARGET}/src --include="*.html" | sort -u
+# 공유 컴포넌트 디렉터리 구조
+ls -R {TARGET}/src/app/shared 2>/dev/null
+```
+발견된 기존 공유 컴포넌트는 playground에서 **원시 마크업 재작성 없이 그 컴포넌트 자체로 진열**한다 (드리프트 방지 — `references/shared-ui-playbook.md` §5).
 
 카테고리 분류:
 - **tokens** — 색상·타이포·스페이싱 갤러리
@@ -253,7 +269,7 @@ mkdir -p {TARGET}/docs/.design-sync
 - **overlay** — modal, drawer, dropdown, tooltip
 - **layout** — 헤더, 사이드바, 그리드 패턴
 
-3회 미만 사용 컴포넌트는 `(선택)` 표시.
+3회 미만 사용 컴포넌트도 **인벤토리와 playground에 포함**하되 `(저빈도)` 표시만 남긴다 (제외 금지 — 전수 진열 원칙).
 결과를 `{TARGET}/docs/.design-sync/components.inventory.md`에 저장.
 
 ---
@@ -776,6 +792,24 @@ Step 2에서 추출한 컴포넌트 목록을 기반으로 실제 HTML/TS를 작
 레퍼런스의 클래스·스타일을 참조하여 Tailwind 탭을 먼저 구현하고,
 동일한 디자인을 PrimeNG 컴포넌트로 구현한다.
 
+> ⚠️ **전수 + 양쪽 강제**: Step 2 인벤토리(2-A 타겟 전수 스캔 포함)의 컴포넌트 유닛은 **빠짐없이** 데모 셀로 진열하고, 각 셀은 **[Tailwind]·[PrimeNG] 두 블록이 모두** 있어야 한다. 한쪽 구현이 기술적으로 불가능한 유닛만 예외로 하되 셀에 "(단일 구현 — {사유})" 캡션을 남긴다.
+
+#### 6-E. 칩 주소 체계 + 카탈로그 운영 장치 (`references/shared-ui-playbook.md` §5 준수)
+
+**이 단계 착수 전 `references/shared-ui-playbook.md`를 Read한다.** 핵심 이식 항목:
+
+1. **pg 칩 렌더러** — 재사용 칩 컴포넌트(`pg-chip`) 생성: `pgId`(복사 텍스트) + `tone`('pattern'=골드 / 'component'=에메랄드), 클릭 → clipboard 복사 + 토스트.
+2. **데모 셀 크롬 표준** — 카드 헤더 = 패턴명 + 골드 `pg://{섹션}/{슬러그}` 칩 + (공유 컴포넌트로 구현된 셀은) 에메랄드 `app-…` 칩 + font-mono 출처 캡션.
+3. **컴포넌트化 셀은 실물 사용** — 타겟에 공유 컴포넌트가 이미 있으면 데모 셀은 원시 마크업 복제 대신 **그 컴포넌트를 직접 렌더**한다(렌더 결과가 곧 baseline). API 밖 변형만 raw 유지 + "(raw — API 미포함 변형)" 캡션.
+4. **다크/라이트 토글** — playground 상단 sticky 헤더에 필수. 모든 셀을 양 모드에서 확인.
+5. **@defer** — 무거운 섹션(data/overlay/charts 등)은 `@defer (on viewport)`로 감싼다.
+6. **REGISTRY 인벤토리** — 타겟에 공유 컴포넌트가 있으면 `src/app/shared/ui/REGISTRY.md`(selector·API 시그니처·pg:// 원천 표)를 생성/갱신한다.
+7. **ID 유니크 검사** (완료 전 필수):
+   ```bash
+   grep -rho 'pg://[a-z-]*/[a-z0-9-]*' {TARGET}/src/app/pages/playground | sort | uniq -d
+   # 출력 없어야 통과
+   ```
+
 ---
 
 ### Step 7 — 디자인 규칙 문서 생성 + CLAUDE.md 갱신
@@ -837,6 +871,12 @@ Step 2에서 추출한 컴포넌트 목록을 기반으로 실제 HTML/TS를 작
 - 신규 UI 요소: Playground에 먼저 추가 → 화면 적용
 - Tailwind와 PrimeNG는 동일 디자인 토큰을 공유함
 
+### 컴포넌트 3+1 원칙
+1. 공유 컴포넌트 우선 — 인라인 재구현 금지, REGISTRY(있으면) 먼저 검색
+2. 중복 감지 → 공용 컴포넌트 승격 + grep으로 앱 전역 교체
+3. 신규 컴포넌트는 사용자 승인 후 생성
+4. Playground 자동 갱신(상시) — 새 컴포넌트/패턴/화면 = 데모 셀+`pg://` 칩(+REGISTRY 행) 추가까지가 한 작업. 누락 = 미완성
+
 ### 폰트
 {폰트 정보 — CDN URL 포함}
 <!-- KAI-DESIGN-RULES:END -->
@@ -887,6 +927,9 @@ Step 2에서 추출한 컴포넌트 목록을 기반으로 실제 HTML/TS를 작
 - ❌ **Tailwind V3 / PrimeNG V20 이하 / Angular V20 이하**에서 강제 진행
 - ❌ **CLAUDE.md 마커 없이 디자인 섹션 전체 교체** — 마커 기반으로만 교체
 - ❌ **단일 Playground 컴포넌트에 모든 요소 집어넣기** — 반드시 sections/ 분할
+- ❌ **데모 셀에서 [Tailwind]·[PrimeNG] 중 한쪽 블록 생략** — 비교가 목적. 기술적 불가 시에만 "(단일 구현 — 사유)" 캡션으로 예외
+- ❌ **인벤토리 컴포넌트 유닛을 빈도 이유로 playground에서 제외** — 전수 진열, 저빈도는 표시만
+- ❌ **`references/shared-ui-playbook.md` 미참조로 칩·REGISTRY·오버레이 래퍼 방식 재발명** — 플레이북이 복제 기준
 - ❌ **`html { font-size: 87.5% }` 누락** — PrimeNG가 16px 기준으로 동작하여 Tailwind보다 크게 보임. `_tokens.css`에 반드시 포함
 - ❌ **`components.button.root`에 `paddingX/paddingY/sm/lg` 오버라이드** — `semantic.formField`의 전역 상속이 깨져 버튼만 비정상적으로 커짐. 패딩은 formField에서만 제어
 - ❌ **`formField.fontSize`만 설정하고 styles.css 오버라이드 생략** — Aura button/inputtext root에 fontSize 토큰 없어 body 폰트 상속됨. PrimeNG 기본 컴포넌트 폰트는 반드시 styles.css에서 `.p-button`, `.p-inputtext` 등 직접 CSS 오버라이드 필요 (핵심 원칙 4)

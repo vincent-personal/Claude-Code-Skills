@@ -110,6 +110,7 @@ Skills/                           ← 본 repo 루트
 6. **sections/ 분할** — 카테고리별 컴포넌트 분리 (tokens/buttons/forms/data-display/feedback/navigation/overlay)
 7. **폰트 복사 금지** — 외부 폰트 URL만 기록, 라이선스 확인은 사용자 몫
 8. **레퍼런스 읽기 전용** — 레퍼런스 프로젝트 파일 쓰기 금지
+9. **이중 구현·전수 진열·칩 주소 체계** — playground 데모 셀은 Tailwind·PrimeNG 양쪽 구현 필수(한쪽 생략 금지), 인벤토리는 레퍼런스+타겟 코드베이스 컴포넌트 유닛 전수 검색(빈도로 제외 금지), 셀마다 `pg://` 칩(클릭=복사). 방법론 원본: `design-sync/kai-design-sync/references/shared-ui-playbook.md` (install.sh가 references/도 링크)
 
 ---
 

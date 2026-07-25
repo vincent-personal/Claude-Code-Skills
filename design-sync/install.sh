@@ -24,6 +24,12 @@ for skill in kai-design-sync; do
   mkdir -p "$TARGET_SKILLS_DIR/$skill"
   ln -sf "$SKILLS_DIR/$skill/SKILL.md" "$TARGET_FILE"
   echo "✓ 스킬 $skill → $TARGET_FILE"
+
+  # 참조 문서 디렉터리도 함께 링크 (SKILL.md가 references/* 를 상대 경로로 읽음)
+  if [ -d "$SKILLS_DIR/$skill/references" ]; then
+    ln -sfn "$SKILLS_DIR/$skill/references" "$TARGET_SKILLS_DIR/$skill/references"
+    echo "✓ 참조 $skill/references → $TARGET_SKILLS_DIR/$skill/references"
+  fi
 done
 
 echo ""
