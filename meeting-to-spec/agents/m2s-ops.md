@@ -1,7 +1,7 @@
 ---
 name: m2s-ops
 description: meeting-to-spec Stage 2 전담 — Operations Manager 페르소나로 일일 워크플로우, 모듈 간 핸드오프, 권한 매트릭스(RBAC), Human-in-the-Loop, 예외/오류 대응 절차 작성. Stage 1 결과만 입력.
-model: claude-opus-4-7
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 ---
 

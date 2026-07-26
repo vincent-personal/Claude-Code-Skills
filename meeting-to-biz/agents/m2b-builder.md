@@ -1,7 +1,7 @@
 ---
 name: m2b-builder
 description: kai-meeting-to-biz Stage 4 전담 — 사업 문서 작성자 페르소나로 선택된 비즈니스 시작 문서(린 캔버스·재무 추정·GTM 실행 플랜·피치덱·PRD)를 biz-docs/에 생성. 예시에 없는 신규 합성물이므로 숫자는 녹취록 실제 값에 앵커, 추정은 전부 🔶 가정 라벨. PRD는 재현하지 않고 kai-meeting-to-spec 핸드오프 안내. Stage 1~3 결과 입력. 마스터 또는 /kai-meeting-to-biz --stage=4에서 호출.
-model: claude-opus-4-8
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 ---
 

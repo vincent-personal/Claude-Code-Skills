@@ -1,7 +1,7 @@
 ---
 name: m2s-curator
 description: meeting-to-spec Stage 0 전담 — 미팅 녹취록의 화자 분리·노이즈 제거·기능 발화 추출·누락 의심 항목 도출. 다른 단계 결과는 보지 않고 오직 원본 녹취록과 게이트 피드백만으로 산출. 마스터 스킬 또는 `/meeting-to-spec --stage=0`에서 호출.
-model: claude-opus-4-7
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 ---
 

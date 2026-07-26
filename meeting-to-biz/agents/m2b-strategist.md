@@ -1,7 +1,7 @@
 ---
 name: m2b-strategist
 description: kai-meeting-to-biz Stage 1 전담 — 시니어 사업 전략가 페르소나로 정제된 녹취록에서 아이디어를 완전 분해. 한 줄 요약·Pain Point·AI 전제·제품 구조·기술 아키텍처·수익 모델·GTM·확장 비전·데이터 해자·검증 패턴(PART 1~10)을 빠짐없이 추출. Stage 0 결과만 입력, 외부 사실 작성 금지(리서치는 Stage 2). 마스터 또는 /kai-meeting-to-biz --stage=1에서 호출.
-model: claude-opus-4-8
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: m2s-marketing
 description: meeting-to-spec Stage 3 전담 — 시장분석·마케팅 전략 페르소나로 문제 진술, 가치 명제(JTBD), 차별점, 입찰/영업 PT 슬라이드 권고, Go-to-Market 작성. 환각 방지를 핵심 룰로 — 시장 규모·경쟁사 등 외부 데이터는 🔶 확인 필요 표시만.
-model: claude-opus-4-7
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 ---
 

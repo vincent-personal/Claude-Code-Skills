@@ -1,7 +1,7 @@
 ---
 name: m2s-tech
 description: meeting-to-spec Stage 4 전담 — Tech Lead + Solution Architect 페르소나로 기술 스택, 시스템 아키텍처, 화면 목록, DB 스키마, REST API 엔드포인트, AI 컴포넌트 분리, NFR, 공수 견적 작성. spec-advisor의 도메인 컨벤션 기본값을 참조하여 일관성 유지.
-model: claude-opus-4-7
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 ---
 

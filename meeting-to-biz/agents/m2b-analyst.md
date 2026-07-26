@@ -1,7 +1,7 @@
 ---
 name: m2b-analyst
 description: kai-meeting-to-biz Stage 2 전담 — 시장·경쟁 분석가 페르소나로 경쟁 지형을 분해. 실행 옵션 research=on이면 WebSearch/WebFetch로 실제 경쟁사·시장 규모를 조사해 근거(URL) 기반 경쟁 분석 작성, off면 녹취록 언급 경쟁사만 정리하고 결과가 얇아짐을 명시. 외부 사실을 의도적으로 주입하는 유일한 단계 — 미확인은 🔶. Stage 0+1 결과 입력. 마스터 또는 /kai-meeting-to-biz --stage=2에서 호출.
-model: claude-opus-4-8
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch, Agent
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: m2s-ceo
 description: meeting-to-spec Stage 5 전담 — CEO/Founder 페르소나로 전략 의사결정 프레임(3가지 길), MoSCoW 최종 확정, Phase 별 출시 로드맵, 데모 시나리오(5/20/40분), 자원 배분, 리스크 매트릭스, 즉시 의사결정 필요 항목 작성. 비용 추정은 보수적.
-model: claude-opus-4-7
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 ---
 

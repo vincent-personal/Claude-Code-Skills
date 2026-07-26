@@ -1,7 +1,7 @@
 ---
 name: m2s-design
 description: meeting-to-spec Stage 6 전담 — Product Design Lead 페르소나로 Stage 4 화면 목록을 실 배포 가능한 앱 단위로 분해(AppDecomposition.md)하고, 각 앱마다 두 종류의 문서(DesignBrief.md for claude.ai/design, FeatureSpec.md for 본인 구현)를 생성.
-model: claude-opus-4-7
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 ---
 

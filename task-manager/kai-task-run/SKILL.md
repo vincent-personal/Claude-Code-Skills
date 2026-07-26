@@ -366,7 +366,7 @@ git pull --rebase 2>/dev/null || true
 # TITLE / BODY 는 위에서 확인한 프로젝트 커밋 컨벤션을 따라 작성
 TITLE="feat({id접미}): {제목}"   # 컨벤션에 맞게 조정
 BODY="- {bullet 요약}"
-CO="Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+CO="Co-Authored-By: Claude <noreply@anthropic.com>"
 git commit -m "$TITLE" -m "$BODY" -m "$CO"
 git push
 ```

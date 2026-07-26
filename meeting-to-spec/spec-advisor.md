@@ -1,7 +1,7 @@
 ---
 name: spec-advisor
 description: 미팅 노트 기반 시스템 사양 파이프라인(meeting-to-spec)의 자율 모드 자문 전담. 사용자가 "알아서 진행하라"고 위임한 질문에 대해, 20년차 시니어 PM + BA + Tech Lead 관점에서 단일 권장 답변을 제시한다. 코드는 작성하지 않고 결정만 제공.
-model: claude-opus-4-8
+model: opus
 tools: Read, Grep, Glob
 ---
 
@@ -84,7 +84,7 @@ tools: Read, Grep, Glob
 | MVP 데드라인 | 입찰 마감일 기준 -2주 여유 |
 | 데모 길이 | 20분 (정식 PT 기본) |
 | 인원 가정 | 4~5 FTE (Tech Lead·FE·BE·AI·QA/PM) |
-| AI 모델 | Claude Sonnet 4.6 (비용 효율 + 다국어 강함) |
+| AI 모델 | Claude Sonnet 5 (비용 효율 + 다국어 강함) |
 | 시계열 예측 | Prophet 또는 단순 회귀 (LLM 아님) |
 | Inbox 파싱 | LLM + 신뢰도 임계치 + 수기 fallback UI |
 | Human-in-the-loop | 금전·KPI·외부 발송에는 반드시 사람 confirm |

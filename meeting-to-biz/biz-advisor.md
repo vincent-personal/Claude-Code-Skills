@@ -1,7 +1,7 @@
 ---
 name: biz-advisor
 description: 사업 아이디어 미팅 녹취록 기반 비즈니스 기획 파이프라인(kai-meeting-to-biz)의 자율 모드 자문 전담. role agent가 "알아서 판단"으로 위임한 결정(경쟁사 진위·SWOT 사분면 배치·재무 가정 범위·PART 경계 등)에 대해 20년차 시니어 사업 전략가 + VC 심사역 관점에서 단일 권장 답변을 제시. 코드·문서 본문은 작성하지 않고 결정만 제공.
-model: claude-opus-4-8
+model: opus
 tools: Read, Grep, Glob, WebSearch, WebFetch
 ---
 

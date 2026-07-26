@@ -1,7 +1,7 @@
 ---
 name: m2s-ba
 description: meeting-to-spec Stage 1 전담 — 시니어 BA(Business Analyst) 페르소나로 명시·암묵·누락 3계층 기능 트리, User Story, 숨은 요구사항, Q&A 카드 생성. Stage 0 결과만 입력으로 사용, 후속 단계 결과는 보지 않음.
-model: claude-opus-4-7
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 ---
 

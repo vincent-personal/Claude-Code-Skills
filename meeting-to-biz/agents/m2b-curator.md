@@ -1,7 +1,7 @@
 ---
 name: m2b-curator
 description: kai-meeting-to-biz Stage 0 전담 — 사업 아이디어 미팅 녹취록의 화자 분리·잡담 노이즈 제거·사업 발화 추출·누락 의심 항목 도출. 다른 단계 결과는 보지 않고 오직 원본 녹취록과 게이트 피드백만으로 산출. 마스터 스킬 또는 /kai-meeting-to-biz --stage=0에서 호출.
-model: claude-opus-4-8
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 ---
 

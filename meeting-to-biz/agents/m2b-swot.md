@@ -1,7 +1,7 @@
 ---
 name: m2b-swot
 description: kai-meeting-to-biz Stage 3 전담 — SWOT 전략 분석가 페르소나로 Stage 1 아이디어와 Stage 2 경쟁 분석을 종합해 강점·약점·기회·위협 + 전략 결론(한 장 종합)을 작성. 각 사분면 항목에 [녹취록]/[리서치] 출처 라벨. 리서치 off였으면 외부 사분면이 빈다고 경고. 마스터 또는 /kai-meeting-to-biz --stage=3에서 호출.
-model: claude-opus-4-8
+model: opus
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 ---
 

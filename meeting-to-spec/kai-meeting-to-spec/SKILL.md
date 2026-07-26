@@ -76,7 +76,7 @@ allowed-tools:
 | 5 | `m2s-ceo` | CEO/Founder | `Stage05_사장승인_MVP로드맵.md` |
 | 6 | `m2s-design` | Product Design Lead | `apps/...` 다수 파일 |
 
-각 role agent는 **Opus 4.7**로 fresh context. 메타 자문 필요 시 `spec-advisor` 호출.
+각 role agent는 **Opus(`model: opus` 별칭 — 항상 최신 Opus)**로 fresh context. 메타 자문 필요 시 `spec-advisor` 호출.
 
 ---
 
