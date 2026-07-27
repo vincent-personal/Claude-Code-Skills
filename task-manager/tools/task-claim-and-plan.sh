@@ -34,7 +34,9 @@ doing_count=0
 for df in "$DOING"/*.md; do
   [ -e "$df" ] || continue
   doing_count=$((doing_count + 1))
-  files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/[[:space:]]*#.*$/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$df")
+  # 주석 제거: '# ...' 외에 ' (신규 ...)' 류 괄호 주석도 잘라낸다 — 공백 토큰 분할 시
+  # 주석 조각("(신규" 등)이 다른 task와 거짓 충돌(기아)을 만드는 것을 방지
+  files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/[[:space:]]*#.*$/,""); gsub(/[[:space:]]*\(.*$/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$df")
   locked_files="$locked_files $files"
 done
 
@@ -63,7 +65,16 @@ for tf in $(ls "$TODO"/*.md 2>/dev/null | sort); do
   [ "$ready" = "true" ] || continue
 
   # ① 선행조건 — predecessors 모두 done에 있어야 함
-  preds=$(awk '/^---$/{c++; next} c==1 && /^predecessors:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/[[:space:]]*#.*$/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
+  # 두 YAML 형식을 모두 파싱한다 — 인라인 `predecessors: [a, b]` 와 블록 `- a` 줄.
+  # 인라인을 놓치면 선행조건이 빈 값으로 읽혀 게이트가 통째로 무력화된다 (2026-07-26 실사고).
+  preds=$(awk '/^---$/{c++; next}
+    c==1 && /^predecessors:/{
+      v=$0; sub(/^predecessors:[[:space:]]*/,"",v); sub(/[[:space:]]*#.*$/,"",v)
+      if (v ~ /^\[/) { gsub(/[][,]/," ",v); print v; b=0 } else { b=1 }
+      next
+    }
+    c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/[[:space:]]*#.*$/,""); print; next}
+    c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
   ok=1
   for pred in $preds; do
     echo "$done_ids" | grep -qF "$pred" || { ok=0; break; }
@@ -71,7 +82,7 @@ for tf in $(ls "$TODO"/*.md 2>/dev/null | sort); do
   [ "$ok" -eq 1 ] || continue
 
   # ② impact_files 추출
-  candidate_files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/[[:space:]]*#.*$/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
+  candidate_files=$(awk '/^---$/{c++; next} c==1 && /^impact_files:/{b=1; next} c==1 && b && /^[[:space:]]*-[[:space:]]/{gsub(/^[[:space:]]*-[[:space:]]*/,""); gsub(/[[:space:]]*#.*$/,""); gsub(/[[:space:]]*\(.*$/,""); print; next} c==1 && b && /^[^[:space:]]/{b=0}' "$tf")
   if [ -z "$candidate_files" ]; then
     mv "$tf" "$BLOCKED/$f" 2>/dev/null || true
     continue
