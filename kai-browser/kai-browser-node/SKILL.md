@@ -56,8 +56,10 @@ Supabase:
   LS_KEY   sb-jexlxbzrpapryytdlzxz-auth-token   (supabase-js v2 세션 저장 키)
 
 테스트 계정:
-  veridadev@proton.me / Veridadev@2026   (비밀번호 → grant_type=password)
-  veridadriver@yopmail.com               (OTP → yopmail 수신 후 verify)
+  veridadev@proton.me / Veridadev@2026    (비밀번호 → grant_type=password)
+  veridadriver@yopmail.com                (OTP → yopmail 수신 후 verify)
+  kimnamseng@yopmail.com / Veridadev@2026 (pulse supplier·Neogen — 2026-07-15 비번 설정)
+  sarang@yopmail.com / Veridadev@2026     (store 사용자 — 2026-07-15 비번 설정)
 
 글로벌 playwright (절대경로 import — ⚠️ nvm node 버전에 묶임):
   /Users/kaifacun/.nvm/versions/node/v24.13.0/lib/node_modules/playwright/index.mjs

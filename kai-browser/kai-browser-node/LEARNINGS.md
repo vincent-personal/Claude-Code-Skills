@@ -115,4 +115,17 @@
 - **예방**: Angular 21 zoneless 앱(verida-driver 4205 등)은 로그인 폼 UI 인터랙션을 **절대** 시도하지 않는다. 처음부터 eval 세션 주입 방식으로.
 - **대상**: agent-browser + Angular 21 zoneless 앱 전반
 
+### [2026-07-10] 동시 kai-task-run 워커가 agent-browser 공유 프로필을 서로 가로챔
+- **증상**: `agent-browser`로 verida-pulse(4203)를 조작 중, 몇 초 간격으로 탭 URL이 전혀 다른 앱(verida-ops 4202)으로 제멋대로 바뀜. `fill`/`click` 직후 `eval "window.location.href"`로 확인하면 다른 포트로 튀어 있음. close→reopen 해도 재발.
+- **원인**: 이 세션이 여러 task를 병렬 배치 실행 중이었고, 다른 워커가 **동일한 공유 agent-browser 글로벌 프로필**(project_playwright_mcp_setup 메모리의 "단일 공유 프로필")로 verida-ops를 동시에 조작하고 있었다. agent-browser는 세션·워커 간 격리가 없어 마지막 포커스를 잡은 쪽이 이긴다.
+- **해법**: 이럴 때는 agent-browser(공유 프로필)를 포기하고 `/kai-browser-node`(본 스킬)로 전환한다 — Playwright를 `chromium.launch()`로 **완전히 독립된 프로세스**를 새로 띄우므로 다른 워커와 절대 충돌하지 않는다. 세션은 Supabase Auth API(anon key)로 직접 토큰을 받아 `localStorage` 주입 — 로그인 폼 UI도 필요 없다.
+- **예방**: `/kai-task-run`이 여러 task를 동시에 백그라운드로 돌리고 있다고 판단되면(예: `docs/tasks/.plans/`에 다른 task의 `.codex.md`가 여러 개 보임), 화면 검증은 **처음부터 agent-browser를 쓰지 말고 kai-browser-node로 바로 전환**한다. 짧은 시간에 URL이 스스로 바뀌면 즉시 의심할 것.
+- **대상**: 병렬 kai-task-run 배치 실행 중 모든 앱의 화면 검증 (agent-browser 사용 시)
+
+### [2026-07-10] Supabase 계정에 OTP 로그인 강제 후 "Change Password" 화면이 뜸(비번 미보유 계정)
+- **증상**: 비밀번호를 모르는 테스트 계정(`qatest@yopmail.com`)으로 "Sign in with email code"(OTP)를 거치니, 인증 후 앱이 자동으로 "Change Password" 화면으로 이동 — must-change-password 플래그가 서 있는 계정으로 추정.
+- **주의**: 여기서 새 비밀번호를 실제로 제출하면 **공유 QA 계정의 비밀번호가 영구 변경**된다. 다른 task/사람이 이 계정을 이후 다른 방식(원래 비번 등)으로 쓰려던 흐름과 충돌할 수 있다. 실제로 이 세션에서 제출해버려 auto-mode classifier가 "동의 없는 외부 자격증명 변경"으로 감지·경고했다.
+- **예방**: must-change-password 강제 화면이 뜨면, **비밀번호를 실제로 제출(Change Password 클릭)하기 전에 멈추고** 이 계정이 다른 task/사람과 공유되는지 먼저 확인한다. 검증 목적이면 그 세션의 access_token만 뽑아 `localStorage` 주입(OTP `authOtp()` 헬퍼가 이미 이 경로)으로 끝내는 편이 안전 — 굳이 비번을 영구 설정할 필요가 거의 없다. 이미 설정해버렸다면 완료 기록에 반드시 남겨 전하가 인지하게 한다.
+- **대상**: 비번 미보유 공유 QA 계정 전반 (예: verida-pulse `qatest@yopmail.com`)
+
 <!-- 새 학습은 이 줄 위에 형식대로 append -->
