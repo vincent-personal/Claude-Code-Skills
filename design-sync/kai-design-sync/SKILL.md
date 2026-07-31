@@ -53,6 +53,8 @@ allowed-tools:
 **핵심 원칙 5 — 이중 구현 비교 + 전수 진열 + 칩 주소 체계:** Playground의 모든 데모 셀은 **Tailwind 구현과 PrimeNG 구현을 나란히** 넣어 비교 가능해야 하고(한쪽 생략 금지), 컴포넌트 인벤토리(Step 2)는 **레퍼런스뿐 아니라 타겟 코드베이스의 기존 컴포넌트 유닛까지 전수 검색**하여 최대한 모두 진열한다. 각 데모 셀에는 유니크 ID 칩(`pg://{섹션}/{슬러그}`, 클릭=복사)을 붙여 사람↔AI 디자인 지정의 공용 언어로 쓴다.
 → 방법론 상세(공유 컴포넌트 추출·API 컨벤션·오버레이 래퍼·p-table 방식·칩 시스템·운영 규칙)는 **`references/shared-ui-playbook.md`를 반드시 읽고 따른다** (churchon-console 실물 기반 플레이북).
 
+**핵심 원칙 6 — 모드별 보완 문서 참조:** 규칙 문서 산출(Step 3·Step 7)과 검증 체크리스트 작성 시 `references/00-common-design-system-rules.md`(공통) + 실행 모드에 해당하는 문서 1부(`references/01-ionic.md` / `references/02-tailwind-primeng.md` / `references/03-tailwind-spartan.md`)를 참고하여 함정·체크리스트 항목을 산출물에 반영한다. 이 문서들은 본 스킬 규정의 **보완**이며, 충돌 시 스킬 규정이 우선한다.
+
 ---
 
 ## ⚡ 실행 절차
@@ -81,14 +83,14 @@ grep -c '"@spartan-ng/'    {TARGET}/package.json   # >0 → spartan 후보
 
 **결정 규칙 (질문은 AskUserQuestion 도구로):**
 1. `@ionic/angular` 감지 → **질문 없이 `MODE=ionic`** (모바일 프레임워크가 이미 확정돼 있어 다른 선택지가 무의미).
-2. PrimeNG 또는 spartan이 **이미 설치**됨 → 감지된 모드를 "(Recommended)" 기본값으로 하여 **1회 확정 질문** — 사용자가 다른 모드를 고르면 그 모드로 진행.
-3. 어느 UI 라이브러리도 없음(순수 Angular) → **2택 질문**: ① Tailwind + PrimeNG ② Tailwind + spartan/ui. **질문에서 선택됨 = 그 스택의 미설치 패키지 설치 승인**으로 간주하고 해당 모드의 설치 절차를 진행한다 (설치 내역은 Step 8 보고에 명시).
+2. PrimeNG 또는 spartan이 **이미 설치**됨 → 감지된 모드를 "(Recommended)" 기본값으로 하여 **1회 확정 질문** — 사용자가 다른 모드를 고르면 그 모드로 진행 (이 경우에도 선택 = 그 모드 미설치 패키지의 설치 승인).
+3. UI 라이브러리(ionic·primeng·spartan) 어느 것도 없음 — **Tailwind만 설치된 타겟 포함** → **반드시 2택 질문**: ① Tailwind + PrimeNG ② Tailwind + spartan/ui. 감지 결과만으로 추정해 진행하지 않는다. **질문에서 선택됨 = 그 스택의 미설치 패키지 설치 승인**으로 간주하고, 확정 모드에서 빠진 패키지(예: Tailwind-only 타겟이면 `primeng` 또는 `@spartan-ng/*` 계열, Tailwind 자체가 없으면 `tailwindcss`)를 해당 모드의 설치 절차로 설치한다 (설치 내역은 Step 8 보고에 명시).
 
 - `MODE=primeng` (기본) → 아래 스택 검증·보조 패키지 설치 그대로 진행.
 - `MODE=spartan` → **§spartan 모드 치환표를 따른다**: PrimeNG 관련 검증·보조 3종 설치·정렬 트릭(핵심 원칙 2·3·4·cssLayer)을 적용하지 않는다.
 - `MODE=ionic` → **§Ionic 모드 치환표를 따른다**: 코어 검증은 Angular V20+ + `@ionic/angular` V8+만 확인하고, **Tailwind·PrimeNG 부재는 정상이며 설치하지 않는다** (보조 3종 설치 단계도 skip). 절차·산출물은 전부 동일하되 Step 4·5·6의 구현 대상만 치환된다.
 
-**스택 검증 (타겟 프로젝트 · 코어 3종 — 검증만, 설치하지 않음):**
+**스택 검증 (타겟 프로젝트 · 코어 3종):**
 
 ```bash
 # Tailwind V4 확인
@@ -101,8 +103,9 @@ grep -r "primeng" {TARGET}/package.json
 grep -r "@angular/core" {TARGET}/package.json
 ```
 
-- Tailwind V3 / PrimeNG V20 이하 / Angular V20 이하 발견 시 → BLOCKED 보고 후 종료.
-- **코어 3종 중 하나라도 package.json에 아예 없으면** → 동일하게 BLOCKED (메이저 스택 설치는 프로젝트 구조 결정이므로 사용자 몫 — 자동 설치 금지).
+- **구버전 발견 시 → BLOCKED**: Tailwind V3 / PrimeNG V20 이하 / Angular V20 이하 — 메이저 업그레이드는 침습적이므로 사용자 몫, 자동 업그레이드 금지.
+- **`@angular/core` 부재 → BLOCKED**: Angular 도입 자체는 프로젝트 구조 결정이므로 자동 설치 금지.
+- **모드 스택 패키지(`tailwindcss`·`primeng`·`@spartan-ng/*`) 부재** → 모드 확정 질문에서 그 스택이 **선택된 경우에 한해** 설치 승인으로 간주하고 설치한다 (결정 규칙 2·3). 질문 없이 부재 상태로 진행하거나 임의 설치하는 것은 금지.
 
 **보조 패키지 검증 + 자동 설치 (Step 4~5 산출물의 빌드 전제):**
 
