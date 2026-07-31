@@ -67,7 +67,7 @@ TARGET=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 2. **타겟 경로 존재** — Angular 프로젝트인지 `angular.json` 유무로 확인
 3. **레퍼런스 == 타겟** → 즉시 BLOCKED (자기 자신 덮어쓰기 방지)
 
-**스택 검증 (타겟 프로젝트):**
+**스택 검증 (타겟 프로젝트 · 코어 3종 — 검증만, 설치하지 않음):**
 
 ```bash
 # Tailwind V4 확인
@@ -80,13 +80,35 @@ grep -r "primeng" {TARGET}/package.json
 grep -r "@angular/core" {TARGET}/package.json
 ```
 
-Tailwind V3 / PrimeNG V20 이하 / Angular V20 이하 발견 시 → BLOCKED 보고 후 종료.
+- Tailwind V3 / PrimeNG V20 이하 / Angular V20 이하 발견 시 → BLOCKED 보고 후 종료.
+- **코어 3종 중 하나라도 package.json에 아예 없으면** → 동일하게 BLOCKED (메이저 스택 설치는 프로젝트 구조 결정이므로 사용자 몫 — 자동 설치 금지).
+
+**보조 패키지 검증 + 자동 설치 (Step 4~5 산출물의 빌드 전제):**
+
+이 스킬이 생성하는 코드가 import하는 보조 패키지 3종은 **부재 시 자동 설치한다** (없으면 Step 4-C의 `@import`·Step 5 preset이 빌드를 깨뜨림):
+
+```bash
+cd {TARGET}
+MISSING=""
+for pkg in tailwindcss-primeui primeicons @primeuix/themes; do
+  grep -q "\"$pkg\"" package.json || MISSING="$MISSING $pkg"
+done
+if [ -n "$MISSING" ]; then
+  echo "📦 보조 패키지 설치:$MISSING"
+  npm install$MISSING
+fi
+```
+
+- 설치한 패키지는 Step 8 완료 보고에 명시한다 (package.json 변경 사실 고지).
+- `npm install` 실패 시 → BLOCKED 보고 후 종료 (실패한 채 진행하면 Step 4~5 산출물이 빌드 불가).
+- dev 서버는 여전히 건드리지 않는다 — 설치는 의존성 추가일 뿐, 서버 시작 금지 원칙과 무관.
 
 Step 0 완료 후 다음을 사용자에게 보고:
 ```
 ✅ 레퍼런스: {경로} ({타입: HTML파일 | 프로젝트})
 ✅ 타겟: {TARGET}
 ✅ 스택: Angular {버전} / Tailwind {버전} / PrimeNG {버전}
+📦 보조 패키지: {이미 있음 | N종 설치함: ...}
 ```
 
 ---
@@ -904,6 +926,9 @@ Step 2에서 추출한 컴포넌트 목록을 기반으로 실제 HTML/TS를 작
   src/app/app.routes.ts
   CLAUDE.md (디자인 규칙 섹션)
 
+📦 설치된 보조 패키지:
+  {Step 0에서 설치했으면 목록 + package.json 변경 고지 | 없으면 "없음 (모두 기존재)"}
+
 🔤 폰트 주의:
   {외부 폰트가 있으면} → 라이선스 확인 필요 [!]
   CDN URL: {URL}
@@ -925,6 +950,8 @@ Step 2에서 추출한 컴포넌트 목록을 기반으로 실제 HTML/TS를 작
 - ❌ **dev 서버 자동 시작** (`ng serve`, `npm run start`) — 사용자 서버 보호 원칙
 - ❌ **Playground를 eagerly load** — 반드시 `loadComponent: () => import(...)` lazy 방식
 - ❌ **Tailwind V3 / PrimeNG V20 이하 / Angular V20 이하**에서 강제 진행
+- ❌ **코어 스택(Angular·Tailwind·PrimeNG) 자동 설치·업그레이드** — 메이저 스택은 BLOCKED 보고만. 자동 설치는 보조 3종(tailwindcss-primeui·primeicons·@primeuix/themes)에 한정
+- ❌ **보조 패키지 설치 실패 상태로 Step 4 진행** — 산출물이 빌드 불가가 됨. BLOCKED 종료
 - ❌ **CLAUDE.md 마커 없이 디자인 섹션 전체 교체** — 마커 기반으로만 교체
 - ❌ **단일 Playground 컴포넌트에 모든 요소 집어넣기** — 반드시 sections/ 분할
 - ❌ **데모 셀에서 [Tailwind]·[PrimeNG] 중 한쪽 블록 생략** — 비교가 목적. 기술적 불가 시에만 "(단일 구현 — 사유)" 캡션으로 예외
