@@ -2,8 +2,10 @@
 name: kai-design-sync
 description: |
   레퍼런스(HTML 파일 또는 프로젝트 경로)에서 디자인 시스템을 추출하여
-  Angular V21 + Tailwind V4 + PrimeNG V21 타겟 프로젝트에 완전히 동일한 테마로 적용하고,
-  playground 컴포넌트와 디자인 규칙을 생성하는 전역 스킬.
+  타겟 프로젝트에 완전히 동일한 테마로 적용하고, playground 컴포넌트와
+  디자인 규칙을 생성하는 전역 스킬. 타겟 스택 자동 감지:
+  Angular V21 + Tailwind V4 + PrimeNG V21 (기본 모드) 또는
+  Ionic 8 + Angular (Ionic 모드 — Tailwind·PrimeNG 없이 순수 Ionic 중앙 통합 테마).
   트리거: /kai-design-sync
   사용법: /kai-design-sync <레퍼런스경로> [<타겟경로>]
 allowed-tools:
@@ -66,6 +68,16 @@ TARGET=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 1. **레퍼런스 경로 존재** — 파일(`*.html`) 또는 디렉토리인지 감지하여 타입 기록
 2. **타겟 경로 존재** — Angular 프로젝트인지 `angular.json` 유무로 확인
 3. **레퍼런스 == 타겟** → 즉시 BLOCKED (자기 자신 덮어쓰기 방지)
+
+**타겟 모드 감지 (스택 검증 전 · 필수):**
+
+```bash
+grep -q '"@ionic/angular"' {TARGET}/package.json && MODE="ionic" || MODE="primeng"
+echo "MODE=$MODE"
+```
+
+- `MODE=primeng` (기본) → 아래 스택 검증·보조 패키지 설치 그대로 진행.
+- `MODE=ionic` → **§Ionic 모드 치환표를 따른다**: 코어 검증은 Angular V20+ + `@ionic/angular` V8+만 확인하고, **Tailwind·PrimeNG 부재는 정상이며 설치하지 않는다** (보조 3종 설치 단계도 skip). 절차·산출물은 전부 동일하되 Step 4·5·6의 구현 대상만 치환된다.
 
 **스택 검증 (타겟 프로젝트 · 코어 3종 — 검증만, 설치하지 않음):**
 
@@ -940,6 +952,135 @@ Step 2에서 추출한 컴포넌트 목록을 기반으로 실제 HTML/TS를 작
 
 ---
 
+## 🅘 Ionic 모드 — 단계별 치환표 (MODE=ionic)
+
+> **대원칙**: 산출물 목록·실행 절차·칩 체계·문서 골격·Red Lines는 **기본 모드와 전부 동일**하다.
+> 바뀌는 것은 오직 "디자인 구현 수단" — Tailwind → **순수 SCSS(중앙 통합 테마)**, PrimeNG preset → **Ionic 테마 변수**.
+> Tailwind·PrimeNG를 **설치하지도, 쓰지도 않는다.**
+
+| 기본 모드 | Ionic 모드 치환 |
+|---|---|
+| Step 4 `src/styles/_tokens.css` (@theme) | **4-I** `src/theme/tokens.scss` (`:root` 변수만) |
+| Step 5 PrimeNG preset (`*-preset.ts`) | **5-I** `variables.scss` `--ion-*` 매핑 + 컴포넌트 중앙 기본값 |
+| (없음) | **5-I-b** `src/theme/components.scss` — 레퍼런스 시각 클래스 이식 |
+| Step 6 [Tailwind]·[PrimeNG] 이중 블록 | **6-I** [Custom CSS]·[Ionic 컴포넌트] 이중 블록 |
+| 핵심 원칙 2 `html { font-size: 87.5% }` | **적용 금지** (Ionic 컴포넌트 크기가 흔들림) |
+
+### 4-I. 토큰 계층 — `src/theme/tokens.scss`
+
+Step 1 추출 토큰(레퍼런스가 claude 디자인 export면 `_ds/*/tokens/*.css`의 `:root` 변수를 그대로)을 `src/theme/tokens.scss`에 이식하고 `global.scss` 최상단에서 import한다. 색상·반경·간격·그림자 전부 CSS 변수 — **단일 진실원** (핵심 원칙 1 동일 적용).
+
+**토큰 3계층 구분 (중복 진실원 방지):**
+```scss
+:root {
+  --color-blue-600: #1d4ed8;                       /* ① primitive — 색상 리터럴은 여기서만 허용 */
+  --color-action-primary: var(--color-blue-600);   /* ② semantic — 용도명, var() 참조만 */
+  /* ③ mapping(--ion-*)은 5-I variables.scss — var() 참조만 */
+}
+```
+"hex 하드코딩 금지"의 정확한 의미: **primitive 선언에만 리터럴 허용**, semantic·mapping·component·페이지 계층은 `var(--*)`만.
+
+### 5-I. Ionic 매핑 계층 — `variables.scss` (백업 후 마커 기반 · 공식 테마 사양 준수)
+
+`src/theme/variables.scss`를 백업 후, 마커(`/* KAI-DESIGN-IONIC:START */` ~ `END`) 블록으로 추가/교체한다:
+
+1. **모드 통일 (3플랫폼 동일 디자인의 전제)**: Ionic은 플랫폼별로 iOS/MD 두 모드의 스타일을 달리 적용한다 — 그대로 두면 **네이티브 iOS·Android·웹에서 서로 다른 모양**이 된다. 레퍼런스와 픽셀 동일이 목표이므로 `app.config.ts`(또는 main.ts)에서 **단일 모드로 고정**한다:
+   ```typescript
+   provideIonicAngular({ mode: 'md' })  // 전 플랫폼 동일 렌더링
+   ```
+   (플랫폼 네이티브 감각을 살릴 특별한 이유가 있을 때만 양 모드 유지 + `:root.ios, :root.md` 병기로 변수 통일)
+   > ⚠️ **의식적 트레이드오프**: iOS에 md 고정은 Ionic의 Dynamic Font Scaling 권고(iOS=ios 모드)와 상충한다 — 픽셀 일관성을 얻는 대신 플랫폼 네이티브 타이포 최적화를 포기하는 것. 하여 **OS 글꼴 최대 배율에서 헤더/버튼 잘림·겹침이 없는지 시험**을 완료 조건에 포함한다. 같은 이유로 **root(`html`) font-size 재정의는 87.5%뿐 아니라 일체 금지**(Dynamic Font Scaling 방해).
+
+2. **팔레트 매핑 (색상당 6종 변형 의무 — 공식 사양)**: 토큰 → Ionic 색상은 base만으로 동작하지 않는다. **반드시 6종 세트**로 정의한다:
+   ```scss
+   :root {
+     --ion-color-primary: var(--accent);
+     --ion-color-primary-rgb: {accent의 R, G, B};        /* 투명도 조합용 — rgb 삼중값 필수 */
+     --ion-color-primary-contrast: var(--accent-ink);
+     --ion-color-primary-contrast-rgb: {accent-ink의 R, G, B};
+     --ion-color-primary-shade: var(--accent-active);     /* 눌림 상태 */
+     --ion-color-primary-tint: var(--accent-hover);       /* 밝은 변형 */
+   }
+   ```
+   토큰에 없는 색(danger·warning 등)도 동일 세트로. **커스텀 색 추가 시 `.ion-color-{이름}` 클래스가 반드시 함께** 있어야 `<ion-button color="{이름}">`이 동작한다 (공식 필수 규칙):
+   ```scss
+   .ion-color-brand {
+     --ion-color-base: var(--ion-color-brand);
+     --ion-color-base-rgb: var(--ion-color-brand-rgb);
+     --ion-color-contrast: var(--ion-color-brand-contrast);
+     --ion-color-contrast-rgb: var(--ion-color-brand-contrast-rgb);
+     --ion-color-shade: var(--ion-color-brand-shade);
+     --ion-color-tint: var(--ion-color-brand-tint);
+   }
+   ```
+
+3. **애플리케이션 변수 + stepped colors 재생성 (⚠️ 누락 시 컴포넌트 깨짐)**: `--ion-background-color`·`--ion-text-color`를 토큰으로 바꾸면, Ionic 컴포넌트들이 내부적으로 쓰는 **stepped colors 두 계열(`--ion-text-color-step-50~950`·`--ion-background-color-step-50~950`)을 반드시 함께 재생성**해야 한다 — 안 하면 보더·구분선·비활성 텍스트가 기본 흑백 혼합으로 남아 테마가 어긋난다.
+   **생성 방식: 스킬이 이식 시점에 혼합값을 직접 계산하여 정적 hex로 기록한다** (텍스트 스텝 = ink→bg 5% 간격 혼합, 배경 스텝 = bg→ink 5% 간격 혼합, 각 50~950 전 단계):
+   ```scss
+   :root {
+     --ion-background-color: var(--bg);
+     --ion-background-color-rgb: {bg의 R, G, B};
+     --ion-text-color: var(--ink);
+     --ion-text-color-rgb: {ink의 R, G, B};
+     /* stepped — 이식 시점 정적 계산값 (예: ink #111827 × bg #f7f2ea) */
+     --ion-text-color-step-50:  #1c2330;   /* 5% */
+     --ion-text-color-step-100: #272e3a;   /* 10% */
+     /* ... step-950까지 · background 계열 동일 패턴 ... */
+   }
+   ```
+   > ⛔ `color-mix()`를 기본 생성 방식으로 쓰지 않는다 — Ionic 8 공식 지원 범위(WebView/Chrome 89+)에 color-mix 미지원 구간(89~110)이 있어 그 기기에서 스텝이 통째로 죽는다. 정적값이 기본이고, color-mix는 `@supports` 블록 안의 점진 향상으로만 선택 사용.
+
+4. **컴포넌트 중앙 기본값 + semantic variant**: 앱이 쓰는 ion-* 컴포넌트의 디자인을 **여기서 1회 확정**한다. 단, 전역 요소 셀렉터는 alert·toolbar·modal 내부까지 전부 물들이므로 **전역에는 안전한 공통값만** 두고, 변형은 **`.ds-*` semantic variant 클래스**로 중앙 정의한다:
+   ```scss
+   ion-button { --border-radius: var(--radius); text-transform: none; }  /* 전역: 안전한 공통값만 */
+   ion-button.ds-compact { --padding-start: 0.5rem; --padding-end: 0.5rem; min-height: 32px; }
+   ion-card   { --background: var(--surface); box-shadow: var(--shadow-sm); border-radius: var(--radius-lg); }
+   /* Step 2 인벤토리에 등장하는 ion-* 전 종 + 레퍼런스에 보이는 변형을 .ds-*로 커버 */
+   ```
+   페이지 규율: **새 시각값 정의는 금지**하되, 중앙에 정의된 `.ds-*` variant와 공개 CSS 변수의 **소비는 허용** (절대 금지로 두면 인라인 우회를 유발한다).
+
+5. **Shadow DOM 규칙 (정밀)**: ion-* 는 Shadow/Scoped/Light DOM이 혼재한다 — **각 컴포넌트 API 문서가 공개하는 CSS 변수·Shadow Parts를 우선 사용**하고, Shadow DOM 내부 비공개 구조는 선택하지 않는다(`::ng-deep` 금지). `::part()`는 공개된 part만·체이닝 불가. 공개 API로 재현 불가한 디테일은 "공개 API 범위 내 최접근"으로 판정하고 그 사실을 데모 셀 캡션에 남긴다.
+
+6. **다크 모드 (레퍼런스에 다크 팔레트가 있을 때)**: `@ionic/angular/css/palettes/dark.class.css`(수동 토글) 또는 `dark.system.css`(OS 추종) 택1. 배선 필수 3종: ① 다크 토큰 매핑은 **Ionic 팔레트 import "뒤"에** 같은 스코프 강도(`.ion-palette-dark` — class 방식이면 **`html` 요소에 부착**)로 정의(순서·구체성에서 밀리면 Ionic 기본 다크가 이김) ② **다크용 stepped colors도 재생성** ③ 네이티브면 Capacitor StatusBar 색을 팔레트 전환과 함께 동기화.
+
+### 5-I-c. 3플랫폼 필수 요건 (네이티브 · 모바일웹 · 데스크탑웹)
+
+이 앱은 세 환경에서 모두 돌아간다 — 아래를 빠뜨리면 특정 환경에서만 깨진다:
+
+- **Safe Area (네이티브)**: 노치·홈 인디케이터 영역은 `var(--ion-safe-area-top/bottom/left/right)`로 처리한다. 레퍼런스의 `ms-*` 셸 클래스를 이식할 때 고정 헤더/풋터 패딩에 이 변수를 **합산**해 둔다 (웹에서는 0으로 해석되어 무해).
+- **hover는 데스크탑 전용으로 격리**: 터치 기기에서 hover 스타일이 "끼임" 현상을 만든다 — 모든 hover 규칙은 `@media (hover: hover)` 안에만 작성한다.
+- **데스크탑 셸 전략을 명시적으로 결정**: 모바일 설계 화면이 데스크탑 전폭으로 늘어지면 깨진다. 둘 중 하나를 design-rules.md에 기록한다: ① 중앙 고정폭 셸(`max-width` + 중앙 정렬 — 레퍼런스의 폰 프레임 방식) ② 브레이크포인트별 반응형 재배치. 미결정 상태로 두지 않는다.
+- **스크롤은 `ion-content`에 위임**: 커스텀 `overflow` 스크롤 컨테이너를 만들지 않는다 — 네이티브 관성 스크롤·키보드 회피·pull-to-refresh가 ion-content에 묶여 있다. 레퍼런스의 스크롤 영역(`ms-scroll` 류)은 이식 시 ion-content 내부 레이아웃으로 재배치한다.
+- **네이티브 시스템 UI 동기화**: 웹 CSS만으로 끝나지 않는다 — Capacitor **StatusBar 스타일/배경**(라이트·다크 각각), 스플래시 배경색 = 첫 화면 배경 토큰 일치, 키보드 열림 시 입력창·푸터 가림 여부를 확인 항목에 포함한다.
+- **safe-area 적용 범위**: 고정 헤더/풋터 외에 `fullscreen` ion-content·모달/시트·FAB(fixed slot)·가로모드 좌우 노치도 대상이다 — 기본 `ion-header+content+footer` 구조를 벗어나는 화면마다 개별 확인.
+- **접근성 최소선**: OS 글꼴 최대 배율에서 잘림·조작 불가 없음(픽셀 동일 기준은 기본 배율에만 적용), 애니메이션은 `@media (prefers-reduced-motion: reduce)` 존중.
+- **픽셀 동일의 한계 명시**: OS별 글꼴 래스터라이징 차이로 "완전 동일 픽셀"은 불가 — 목표는 **동일 viewport 기준 시각적 회귀 없음**으로 정의하고 design-rules.md에 그리 기록한다.
+- **검증 3종 세트**: Step 8 완료 전 ① 데스크탑 브라우저 ② 모바일 뷰포트(devtools 에뮬레이션) ③ 가능하면 실기기/시뮬레이터(`npx cap run` — 에뮬레이션은 네이티브 WebView를 대체하지 못함)에서 playground를 확인하고, 불가한 항목은 보고서에 **미검증으로 명시**한다.
+
+### 5-I-b. 공유 시각 계층 — `src/theme/components.scss`
+
+레퍼런스의 커스텀 시각 클래스(예: `ms-*`)를 **번역 없이 그대로 이식**한다 (Tailwind 유틸리티로 변환하지 않는다 — 이식이 곧 픽셀 충실). 카드·배지·리스트행 등 시각 요소는 이 계층의 완성품 클래스로 쓰고, ion-* 는 구조(내비게이션·시트·제스처)에 집중시킨다.
+
+- **스코프 제한**: 전역 평면에 두지 않고 **`ion-app` 하위로 중첩**하여 이식한다 (`ion-app { .ms-card { ... } }`) — 타 라이브러리와의 이름 충돌·전역 누수 방지.
+- **스크롤 재배치**: 레퍼런스의 자체 스크롤 클래스(`ms-scroll` 류)는 `overflow`를 제거하고 ion-content 내부 레이아웃으로 옮긴다 (5-I-c 스크롤 위임 원칙).
+
+### 6-I. Playground 이중 블록
+
+Step 6 절차(단일 스크롤·sections/·칩·전수 진열·REGISTRY·다크/라이트 토글·@defer) 전부 동일. 각 데모 셀의 두 블록만 치환:
+- 블록 1 `[Custom CSS]` — 5-I-b 공유 클래스 구현
+- 블록 2 `[Ionic]` — 동일 디자인의 ion-* 컴포넌트 구현 (5-I 중앙 변수로 스타일됨)
+두 블록이 같은 `var(--*)`를 공유하므로 시각 동일이 보장된다.
+
+**안 먹을 때 판별법 (design-rules.md·CLAUDE.md 블록에 포함시킬 것):**
+> 스타일이 적용되지 않으면 — 그 요소가 **내가 쓴 일반 HTML**이면 구체성/이식 누락 문제(공유 계층 확인), **`ion-*` 태그 내부**면 Shadow DOM — 클래스가 아니라 `--ion-*` 변수·`::part()`로 전환한다.
+
+### 7-I. 규율 (design-rules.md·CLAUDE.md 마커 블록에 추가)
+
+- **페이지에서 인라인 스타일·일회성 CSS 정의 금지** — 필요한 디자인은 먼저 중앙(5-I/5-I-b)에 정의·수정 후 사용 (중앙 통합 테마의 성패 조건)
+- 신규 ion-* 컴포넌트 도입 시: variables.scss 중앙 기본값 + playground 셀 추가까지가 한 작업
+
+---
+
 ## Red Lines (절대 금지)
 
 - ❌ **레퍼런스 프로젝트 파일 수정** — 읽기(Read/Grep)만 허용
@@ -957,6 +1098,17 @@ Step 2에서 추출한 컴포넌트 목록을 기반으로 실제 HTML/TS를 작
 - ❌ **데모 셀에서 [Tailwind]·[PrimeNG] 중 한쪽 블록 생략** — 비교가 목적. 기술적 불가 시에만 "(단일 구현 — 사유)" 캡션으로 예외
 - ❌ **인벤토리 컴포넌트 유닛을 빈도 이유로 playground에서 제외** — 전수 진열, 저빈도는 표시만
 - ❌ **`references/shared-ui-playbook.md` 미참조로 칩·REGISTRY·오버레이 래퍼 방식 재발명** — 플레이북이 복제 기준
+
+**Ionic 모드 (MODE=ionic) 전용 Red Lines:**
+- ❌ **Tailwind·PrimeNG 설치/도입** — 순수 Ionic 중앙 테마가 결정사항. 유틸리티가 필요하면 5-I-b 공유 클래스로
+- ❌ **root(`html`) font-size 재정의 일체** — 87.5% 트릭 포함 전면 금지. Ionic Dynamic Font Scaling·컴포넌트 크기 체계가 흔들림 (기본 모드 전용 트릭)
+- ❌ **stepped colors를 `color-mix()` 기본 생성** — WebView 89~110 구간에서 통째로 죽음. 정적 계산값 기본, color-mix는 `@supports` 점진 향상만
+- ❌ **`::ng-deep`·Shadow DOM 침투 시도** — ion-* 내부는 컴포넌트 CSS 변수·`::part()`만
+- ❌ **커스텀 색 추가 시 `.ion-color-{이름}` 클래스 누락** — `color=` 속성이 조용히 무시됨 (공식 필수 규칙)
+- ❌ **`--ion-background-color`/`--ion-text-color` 변경 시 stepped colors(50~950) 미재생성** — 보더·비활성 텍스트가 기본 흑백 혼합으로 남아 테마 어긋남
+- ❌ **페이지에서 인라인 스타일·일회성 CSS 정의** — 중앙(5-I/5-I-b)에 먼저 정의 후 사용
+- ❌ **hover 규칙을 `@media (hover: hover)` 밖에 작성** — 터치 기기 hover 끼임
+- ❌ **커스텀 overflow 스크롤 컨테이너 생성** — 스크롤은 ion-content 위임 (네이티브 관성·키보드 회피 상실)
 - ❌ **`html { font-size: 87.5% }` 누락** — PrimeNG가 16px 기준으로 동작하여 Tailwind보다 크게 보임. `_tokens.css`에 반드시 포함
 - ❌ **`components.button.root`에 `paddingX/paddingY/sm/lg` 오버라이드** — `semantic.formField`의 전역 상속이 깨져 버튼만 비정상적으로 커짐. 패딩은 formField에서만 제어
 - ❌ **`formField.fontSize`만 설정하고 styles.css 오버라이드 생략** — Aura button/inputtext root에 fontSize 토큰 없어 body 폰트 상속됨. PrimeNG 기본 컴포넌트 폰트는 반드시 styles.css에서 `.p-button`, `.p-inputtext` 등 직접 CSS 오버라이드 필요 (핵심 원칙 4)
