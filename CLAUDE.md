@@ -112,6 +112,7 @@ Skills/                           ← 본 repo 루트
 8. **레퍼런스 읽기 전용** — 레퍼런스 프로젝트 파일 쓰기 금지
 9. **이중 구현·전수 진열·칩 주소 체계** — playground 데모 셀은 Tailwind·PrimeNG 양쪽 구현 필수(한쪽 생략 금지), 인벤토리는 레퍼런스+타겟 코드베이스 컴포넌트 유닛 전수 검색(빈도로 제외 금지), 셀마다 `pg://` 칩(클릭=복사). 방법론 원본: `design-sync/kai-design-sync/references/shared-ui-playbook.md` (install.sh가 references/도 링크)
 10. **Ionic 모드 (타겟에 `@ionic/angular` 감지 시)** — 절차·산출물·칩 체계는 동일하되 구현 수단만 치환: Tailwind·PrimeNG **불설치·불사용**, 순수 Ionic 중앙 통합 테마(`theme/tokens.scss` 단일 진실원 → `variables.scss` `--ion-*` 매핑 · 색상 6종 변형+`.ion-color-*` 클래스 · stepped colors 재생성 → `components.scss` 레퍼런스 시각 클래스 무번역 이식). 3플랫폼(네이티브·모바일웹·데스크탑웹) 요건 필수: 모드 통일(`mode:'md'`)·safe-area·`@media(hover:hover)` 격리·ion-content 스크롤 위임·데스크탑 셸 전략 명시
+11. **3모드 + 모드 확정 질문** — primeng/spartan/ionic. Ionic 감지 시 무질문, 그 외에는 AskUserQuestion으로 모드 확정(감지된 스택이 기본값 · **질문에서 선택됨 = 미설치 스택 설치 승인**). spartan 모드: shadcn식 `:root`/`.dark` 변수(**전체 색값 형식** — hsl 성분 아님) 매핑 + helm copy-in 수정 2단 규율(색·간격은 테마 변수만, helm 수정은 variant 추가 시만 + REGISTRY "(modified)" · CLI 재생성 전 diff 필수) · PrimeNG 정렬 트릭(원칙 2·3·4·cssLayer) 미적용
 
 ---
 

@@ -3,9 +3,9 @@ name: kai-design-sync
 description: |
   레퍼런스(HTML 파일 또는 프로젝트 경로)에서 디자인 시스템을 추출하여
   타겟 프로젝트에 완전히 동일한 테마로 적용하고, playground 컴포넌트와
-  디자인 규칙을 생성하는 전역 스킬. 타겟 스택 자동 감지:
-  Angular V21 + Tailwind V4 + PrimeNG V21 (기본 모드) 또는
-  Ionic 8 + Angular (Ionic 모드 — Tailwind·PrimeNG 없이 순수 Ionic 중앙 통합 테마).
+  디자인 규칙을 생성하는 전역 스킬. 타겟 스택 자동 감지 + 모드 확정 질문 — 3모드:
+  ① Tailwind V4 + PrimeNG V21 (기본) ② Tailwind V4 + spartan/ui (shadcn식 copy-in)
+  ③ Ionic 8 순수 중앙 통합 테마 (Tailwind·PrimeNG 불사용).
   트리거: /kai-design-sync
   사용법: /kai-design-sync <레퍼런스경로> [<타겟경로>]
 allowed-tools:
@@ -69,14 +69,23 @@ TARGET=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 2. **타겟 경로 존재** — Angular 프로젝트인지 `angular.json` 유무로 확인
 3. **레퍼런스 == 타겟** → 즉시 BLOCKED (자기 자신 덮어쓰기 방지)
 
-**타겟 모드 감지 (스택 검증 전 · 필수):**
+**타겟 모드 감지 + 사용자 확정 질문 (스택 검증 전 · 필수):**
+
+3모드를 지원한다: `primeng`(Tailwind V4 + PrimeNG V21) / `spartan`(Tailwind V4 + spartan/ui) / `ionic`(순수 Ionic 중앙 테마).
 
 ```bash
-grep -q '"@ionic/angular"' {TARGET}/package.json && MODE="ionic" || MODE="primeng"
-echo "MODE=$MODE"
+grep -c '"@ionic/angular"' {TARGET}/package.json   # >0 → ionic 후보
+grep -c '"primeng"'        {TARGET}/package.json   # >0 → primeng 후보
+grep -c '"@spartan-ng/'    {TARGET}/package.json   # >0 → spartan 후보
 ```
 
+**결정 규칙 (질문은 AskUserQuestion 도구로):**
+1. `@ionic/angular` 감지 → **질문 없이 `MODE=ionic`** (모바일 프레임워크가 이미 확정돼 있어 다른 선택지가 무의미).
+2. PrimeNG 또는 spartan이 **이미 설치**됨 → 감지된 모드를 "(Recommended)" 기본값으로 하여 **1회 확정 질문** — 사용자가 다른 모드를 고르면 그 모드로 진행.
+3. 어느 UI 라이브러리도 없음(순수 Angular) → **2택 질문**: ① Tailwind + PrimeNG ② Tailwind + spartan/ui. **질문에서 선택됨 = 그 스택의 미설치 패키지 설치 승인**으로 간주하고 해당 모드의 설치 절차를 진행한다 (설치 내역은 Step 8 보고에 명시).
+
 - `MODE=primeng` (기본) → 아래 스택 검증·보조 패키지 설치 그대로 진행.
+- `MODE=spartan` → **§spartan 모드 치환표를 따른다**: PrimeNG 관련 검증·보조 3종 설치·정렬 트릭(핵심 원칙 2·3·4·cssLayer)을 적용하지 않는다.
 - `MODE=ionic` → **§Ionic 모드 치환표를 따른다**: 코어 검증은 Angular V20+ + `@ionic/angular` V8+만 확인하고, **Tailwind·PrimeNG 부재는 정상이며 설치하지 않는다** (보조 3종 설치 단계도 skip). 절차·산출물은 전부 동일하되 Step 4·5·6의 구현 대상만 치환된다.
 
 **스택 검증 (타겟 프로젝트 · 코어 3종 — 검증만, 설치하지 않음):**
@@ -952,6 +961,64 @@ Step 2에서 추출한 컴포넌트 목록을 기반으로 실제 HTML/TS를 작
 
 ---
 
+## 🅢 spartan 모드 — 단계별 치환표 (MODE=spartan)
+
+> **대원칙**: 산출물·절차·칩 체계·문서 골격은 기본 모드와 전부 동일하다. PrimeNG 자리에 **spartan/ui**
+> (shadcn식 copy-in 컴포넌트 — headless `@spartan-ng/brain` + 코드베이스에 복사되는 helm)가 들어간다.
+> spartan은 컴포넌트 자체가 Tailwind로 스타일되므로 **PrimeNG 정렬 트릭이 전부 불필요**하다:
+> 핵심 원칙 2(`html font-size 87.5%`)·3·4(폰트 CSS 오버라이드)와 `providePrimeNG cssLayer`를 **적용하지 않는다**.
+
+| 기본 모드 | spartan 모드 치환 |
+|---|---|
+| Step 0 보조 3종(primeui·primeicons·@primeuix) | **0-S** `@spartan-ng/brain` + `@spartan-ng/cli`(dev) 설치 + `ui-theme` 스캐폴드 |
+| Step 5 PrimeNG preset (`*-preset.ts`) | **5-S** shadcn식 테마 변수 매핑 (`:root`/`.dark`) |
+| (없음) | **5-S-b** helm 컴포넌트 CLI 생성 + 수정 규율 |
+| Step 6 [Tailwind]·[PrimeNG] 이중 블록 | **6-S** [Tailwind raw]·[spartan/ui] 이중 블록 |
+| 핵심 원칙 2·3·4 (rem·폰트 정렬 트릭) | **적용 안 함** (단일 Tailwind 체계라 정렬 대상이 없음) |
+
+### 0-S. 설치·검증
+
+- **코어**: Angular V20+ (부재·미달 → BLOCKED — 자동 설치 금지, 기본 모드와 동일 원칙).
+- **Tailwind V4 부재 시**: 이 모드는 Step 0 질문에서 명시 선택된 것이므로 **선택 = 설치 승인** — `npm install tailwindcss @tailwindcss/postcss` 후 Angular 표준 설정(`.postcssrc.json`)을 구성한다.
+- **spartan**: `npm install @spartan-ng/brain` + `npm install -D @spartan-ng/cli` → `ng g @spartan-ng/cli:ui-theme` (공식 테마 스캐폴드 — 이후 5-S가 마커로 감싸 교체).
+- 설치 실패 → BLOCKED 종료 (실패 채 진행 금지). 설치 내역은 Step 8 보고에 명시.
+
+### 5-S. 테마 매핑 — shadcn식 변수 (`:root` / `.dark` · 공식 사양)
+
+spartan helm은 shadcn 계열 변수를 참조하며, 값은 **전체 색값(oklch/hex) 형식**이다 (hsl 성분값 아님 — 구세대 shadcn과 다름). `ui-theme`가 생성한 기본 블록을 마커(`/* KAI-DESIGN-SPARTAN:START */`~`END`)로 감싸 우리 토큰 매핑으로 교체한다(멱등). 값은 `var(--*)` 참조 — 색상 리터럴은 primitive 토큰에서만 (핵심 원칙 1).
+
+**매핑표 (우리 토큰 → spartan 변수 · `-foreground` 짝 필수):**
+
+| spartan 변수 | 우리 토큰 |
+|---|---|
+| `--background` / `--foreground` | `--bg` / `--ink` |
+| `--card`·`--popover` (+`-foreground`) | `--surface` / `--ink` |
+| `--primary` / `--primary-foreground` | `--accent` / `--accent-ink` |
+| `--secondary`·`--muted`·`--accent`(spartan) (+`-foreground`) | `--bg-2`·soft 계열 / `--text-secondary` |
+| `--muted-foreground` | `--text-tertiary` |
+| `--destructive` | `--danger` |
+| `--border`·`--input` | `--line` |
+| `--ring` | `--accent` |
+| `--radius` | `--radius` |
+
+- 레퍼런스에 다크 팔레트가 있으면 동일 세트를 `.dark` 스코프에 정의하고 `color-scheme: dark`를 병기한다.
+- 우리 토큰에 대응이 없는 변수(sidebar 계열 등)는 가장 가까운 semantic 토큰으로 매핑하고 design-system.md 매핑표에 기록한다.
+
+### 5-S-b. helm 컴포넌트 생성 + 수정 규율 (copy-in 모델)
+
+- Step 2 인벤토리에 필요한 컴포넌트만 `ng g @spartan-ng/cli:ui {이름}` 으로 복사-인한다 (**전량 일괄 생성 금지** — dead code). 배치 경로는 design-rules.md에 기록.
+- **수정 2단 규율**: ① 색·반경·간격 조정은 **테마 변수(5-S)에서만** — helm 파일을 열지 않는다. ② 구조·variant 추가가 필요할 때만 helm 파일을 직접 수정하고, 수정한 helm은 REGISTRY.md에 **"(modified)"** 표기한다.
+- ⚠️ **CLI 재생성은 수정을 덮어쓴다** — 재생성 전 REGISTRY "(modified)" 확인 + diff 필수.
+
+### 6-S. Playground 이중 블록
+
+Step 6 절차(단일 스크롤·sections/·칩·전수 진열·REGISTRY·다크/라이트 토글·@defer) 전부 동일. 각 데모 셀의 두 블록만 치환:
+- 블록 1 `[Tailwind]` — raw 유틸리티 구현
+- 블록 2 `[spartan/ui]` — helm 컴포넌트 구현
+두 블록이 같은 `var(--*)`를 공유하므로 시각 동일이 보장된다.
+
+---
+
 ## 🅘 Ionic 모드 — 단계별 치환표 (MODE=ionic)
 
 > **대원칙**: 산출물 목록·실행 절차·칩 체계·문서 골격·Red Lines는 **기본 모드와 전부 동일**하다.
@@ -1098,6 +1165,13 @@ Step 6 절차(단일 스크롤·sections/·칩·전수 진열·REGISTRY·다크/
 - ❌ **데모 셀에서 [Tailwind]·[PrimeNG] 중 한쪽 블록 생략** — 비교가 목적. 기술적 불가 시에만 "(단일 구현 — 사유)" 캡션으로 예외
 - ❌ **인벤토리 컴포넌트 유닛을 빈도 이유로 playground에서 제외** — 전수 진열, 저빈도는 표시만
 - ❌ **`references/shared-ui-playbook.md` 미참조로 칩·REGISTRY·오버레이 래퍼 방식 재발명** — 플레이북이 복제 기준
+
+**spartan 모드 (MODE=spartan) 전용 Red Lines:**
+- ❌ **PrimeNG 혼입** — 한 앱에 두 UI 컴포넌트 프레임워크 금지 (오버레이·포커스·번들 중복)
+- ❌ **helm 파일에 색상 리터럴** — 수정 시에도 테마 변수 `var(--*)`만
+- ❌ **수정된 helm을 CLI 재생성으로 무확인 덮어쓰기** — REGISTRY "(modified)" 확인 + diff 후에만
+- ❌ **핵심 원칙 2·3·4(rem 87.5%·PrimeNG 폰트 오버라이드)·cssLayer를 spartan 모드에 적용** — 불필요하며 유해
+- ❌ **spartan 변수를 hsl 성분값 형식으로 기록** — 현행 spartan은 전체 색값(oklch/hex) 형식
 
 **Ionic 모드 (MODE=ionic) 전용 Red Lines:**
 - ❌ **Tailwind·PrimeNG 설치/도입** — 순수 Ionic 중앙 테마가 결정사항. 유틸리티가 필요하면 5-I-b 공유 클래스로
