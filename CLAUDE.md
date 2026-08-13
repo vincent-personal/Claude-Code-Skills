@@ -194,6 +194,26 @@ VERIDA 앱 브라우저 검증을 **세 경로로 명시적으로 분리**한다
 
 ---
 
+### sermon-correction
+
+한국어 설교 원문 → 발표용 축약 교정본(HTML + Notion) 변환. 색상 코딩(보존/삭제/수정/추가/성경구절/배경설명)으로 읽을 부분과 건너뛸 부분을 시각 구분.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-sermon-correction | `/kai-sermon-correction` | 발표 시간별 분량 축약 + 색상 교정본 HTML(`docs/`)·Notion 생성 |
+
+**핵심 설계 원칙 (수정 시 반드시 유지):**
+
+1. **원문 전 문장 보존·순서 불변** — 삭제도 삭제선으로 표기(내용 유실 금지)
+2. **색상 규칙·검증 체크리스트는 `references/rulebook.md`가 권위** — HTML 템플릿은 `assets/template.html`
+3. **발표 시간별 목표 분량** — 분당 250자 기준 (30분 ~7,500자 … 10분 ~2,500자)
+4. **원어·배경설명(녹색) 정확성 최우선** — 불확실하면 웹 검색 확인, 원어는 `원문 (음역, 로마자)` 형식
+5. **HTML·Notion 독립 관리** — 명시 없으면 요청받은 쪽만 수정
+
+설치: `bash {repo}/sermon-correction/install.sh` → `~/.claude/skills/kai-sermon-correction/` (SKILL.md·references·assets 링크).
+
+---
+
 ## 작업 시 준수 규칙
 
 ### 1. 스킬 수정 시

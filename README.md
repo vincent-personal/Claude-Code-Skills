@@ -100,6 +100,26 @@ bash {이 repo}/kai-peer-session/install.sh
 
 ---
 
+### sermon-correction
+
+한국어 설교 원문을 발표 시간(10/15/20/30분)에 맞춰 축약한 **발표용 교정본**을 만든다.
+색상 코딩(보존/삭제/수정/추가/성경구절/배경설명)으로 읽을 부분과 건너뛸 부분을 시각 구분한
+HTML(`docs/`)과 Notion 페이지를 생성한다. 원문 전 문장 보존(삭제선 표기)·순서 불변이 원칙.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-sermon-correction | `/kai-sermon-correction` | 설교 원문 → 색상 교정본 HTML + Notion (배경설명·토의 포인트 옵션) |
+
+설치:
+```bash
+bash {이 repo}/sermon-correction/install.sh
+```
+
+- 색상 규칙·검증 체크리스트: `sermon-correction/kai-sermon-correction/references/rulebook.md`
+- HTML 템플릿: `sermon-correction/kai-sermon-correction/assets/template.html`
+
+---
+
 ## 다중 에이전트 안전성 설계
 
 ### 1. 디렉터리 = 상태, `mv` = 원자적 전이
