@@ -4,7 +4,8 @@ description: |
   레퍼런스(HTML 파일 또는 프로젝트 경로)에서 디자인 시스템을 추출하여
   타겟 프로젝트에 완전히 동일한 테마로 적용하고, playground 컴포넌트와
   디자인 규칙을 생성하는 전역 스킬. 타겟 스택 자동 감지 + 모드 확정 질문 — 3모드:
-  ① Tailwind V4 + PrimeNG V21 (기본) ② Tailwind V4 + spartan/ui (shadcn식 copy-in)
+  ① Tailwind V4 + spartan/ui (신규 프로젝트 추천 · shadcn식 copy-in)
+  ② Tailwind V4 + PrimeNG V21 (기존 프로젝트 · 유료 전환 유의)
   ③ Ionic 8 순수 중앙 통합 테마 (Tailwind·PrimeNG 불사용).
   트리거: /kai-design-sync
   사용법: /kai-design-sync <레퍼런스경로> [<타겟경로>]
@@ -84,7 +85,11 @@ grep -c '"@spartan-ng/'    {TARGET}/package.json   # >0 → spartan 후보
 **결정 규칙 (질문은 AskUserQuestion 도구로):**
 1. `@ionic/angular` 감지 → **질문 없이 `MODE=ionic`** (모바일 프레임워크가 이미 확정돼 있어 다른 선택지가 무의미).
 2. PrimeNG 또는 spartan이 **이미 설치**됨 → 감지된 모드를 "(Recommended)" 기본값으로 하여 **1회 확정 질문** — 사용자가 다른 모드를 고르면 그 모드로 진행 (이 경우에도 선택 = 그 모드 미설치 패키지의 설치 승인).
-3. UI 라이브러리(ionic·primeng·spartan) 어느 것도 없음 — **Tailwind만 설치된 타겟 포함** → **반드시 2택 질문**: ① Tailwind + PrimeNG ② Tailwind + spartan/ui. 감지 결과만으로 추정해 진행하지 않는다. **질문에서 선택됨 = 그 스택의 미설치 패키지 설치 승인**으로 간주하고, 확정 모드에서 빠진 패키지(예: Tailwind-only 타겟이면 `primeng` 또는 `@spartan-ng/*` 계열, Tailwind 자체가 없으면 `tailwindcss`)를 해당 모드의 설치 절차로 설치한다 (설치 내역은 Step 8 보고에 명시).
+3. UI 라이브러리(ionic·primeng·spartan) 어느 것도 없음 — **Tailwind만 설치된 타겟 포함** → **반드시 2택 질문 — spartan을 첫 번째 "(Recommended)" 옵션으로**:
+   ① **Tailwind + spartan/ui (Recommended)** — 신규 프로젝트 기본 선택 (오픈소스 · 필요 컴포넌트 충분)
+   ② Tailwind + PrimeNG — 설명에 "⚠️ 유료 라이선스 전환" 명시
+   감지 결과만으로 추정해 진행하지 않는다. **질문에서 선택됨 = 그 스택의 미설치 패키지 설치 승인**으로 간주하고, 확정 모드에서 빠진 패키지(예: Tailwind-only 타겟이면 `primeng` 또는 `@spartan-ng/*` 계열, Tailwind 자체가 없으면 `tailwindcss`)를 해당 모드의 설치 절차로 설치한다 (설치 내역은 Step 8 보고에 명시).
+   > PrimeNG를 추천 기본값으로 두지 않는 이유: 유료 전환. 신규 프로젝트는 spartan 우선이 정책이다 (기존 PrimeNG 프로젝트는 규칙 2로 기존 스택 유지).
 
 - `MODE=primeng` (기본) → 아래 스택 검증·보조 패키지 설치 그대로 진행.
 - `MODE=spartan` → **§spartan 모드 치환표를 따른다**: PrimeNG 관련 검증·보조 3종 설치·정렬 트릭(핵심 원칙 2·3·4·cssLayer)을 적용하지 않는다.
@@ -1009,9 +1014,18 @@ spartan helm은 shadcn 계열 변수를 참조하며, 값은 **전체 색값(okl
 
 ### 5-S-b. helm 컴포넌트 생성 + 수정 규율 (copy-in 모델)
 
-- Step 2 인벤토리에 필요한 컴포넌트만 `ng g @spartan-ng/cli:ui {이름}` 으로 복사-인한다 (**전량 일괄 생성 금지** — dead code). 배치 경로는 design-rules.md에 기록.
+- **기성품 우선 원칙 (자작 금지 기본값)**: UI 요소가 필요하면 순서대로 — ① spartan 카탈로그에서 해당 컴포넌트를 찾아 `ng g @spartan-ng/cli:ui {이름}` 으로 생성 ② 없으면 `@spartan-ng/brain` 프리미티브 조합 ③ 그래도 불가할 때만 자작하되 반드시 중앙(shared/ui)에 두고 REGISTRY에 등록. **spartan에 있는 것을 두고 직접 만드는 것은 금지** — 디자인이 달라 보여도 만들지 말고 테마 변수(5-S)로 우리 디자인 시스템과 일치시킨다.
+- Step 2 인벤토리에 필요한 컴포넌트만 복사-인한다 (**전량 일괄 생성 금지** — dead code). 배치 경로는 design-rules.md에 기록.
 - **수정 2단 규율**: ① 색·반경·간격 조정은 **테마 변수(5-S)에서만** — helm 파일을 열지 않는다. ② 구조·variant 추가가 필요할 때만 helm 파일을 직접 수정하고, 수정한 helm은 REGISTRY.md에 **"(modified)"** 표기한다.
 - ⚠️ **CLI 재생성은 수정을 덮어쓴다** — 재생성 전 REGISTRY "(modified)" 확인 + diff 필수.
+
+### 7-S. 중앙 관리 규율 (design-rules.md·CLAUDE.md 마커 블록에 추가)
+
+**모든 시각 결정은 중앙 3곳에서만 이뤄진다**: ① 테마 변수(5-S) ② helm/shared 컴포넌트(5-S-b) ③ playground(진열·baseline). 페이지·화면 레벨에서는:
+- 새 색·간격·반경·그림자 값 정의 금지 — 필요하면 먼저 토큰·테마 변수에 추가 후 소비
+- 일회성 CSS·인라인 스타일로 컴포넌트 겉모습 조정 금지 — variant가 필요하면 중앙에서 `.ds-*`/helm variant로 추가 후 사용
+- 같은 UI를 페이지마다 재구현 금지 — REGISTRY 먼저 검색, 있으면 import, 유사하면 variant 승격
+→ 목적: **분산 디자인 원천 차단** — 수정은 언제나 중앙 1곳, 전체 반영.
 
 ### 6-S. Playground 이중 블록
 
@@ -1171,6 +1185,8 @@ Step 6 절차(단일 스크롤·sections/·칩·전수 진열·REGISTRY·다크/
 
 **spartan 모드 (MODE=spartan) 전용 Red Lines:**
 - ❌ **PrimeNG 혼입** — 한 앱에 두 UI 컴포넌트 프레임워크 금지 (오버레이·포커스·번들 중복)
+- ❌ **spartan 카탈로그에 있는 컴포넌트를 두고 자작** — 기성품 우선(helm → brain 조합 → 최후에 자작), 디자인 차이는 테마 변수로 해소
+- ❌ **페이지·화면 레벨에서 시각 값(색·간격·반경) 정의** — 중앙 3곳(테마 변수·중앙 컴포넌트·playground)에서만 (7-S 분산 디자인 금지)
 - ❌ **helm 파일에 색상 리터럴** — 수정 시에도 테마 변수 `var(--*)`만
 - ❌ **수정된 helm을 CLI 재생성으로 무확인 덮어쓰기** — REGISTRY "(modified)" 확인 + diff 후에만
 - ❌ **핵심 원칙 2·3·4(rem 87.5%·PrimeNG 폰트 오버라이드)·cssLayer를 spartan 모드에 적용** — 불필요하며 유해
