@@ -56,6 +56,8 @@ allowed-tools:
 
 **핵심 원칙 6 — 모드별 보완 문서 참조:** 규칙 문서 산출(Step 3·Step 7)과 검증 체크리스트 작성 시 `references/00-common-design-system-rules.md`(공통) + 실행 모드에 해당하는 문서 1부(`references/01-ionic.md` / `references/02-tailwind-primeng.md` / `references/03-tailwind-spartan.md`)를 참고하여 함정·체크리스트 항목을 산출물에 반영한다. 이 문서들은 본 스킬 규정의 **보완**이며, 충돌 시 스킬 규정이 우선한다.
 
+**핵심 원칙 7 — 아이콘 기본값은 Iconify (전 모드 공통):** 사용자가 특별히 명시하지 않는 한 아이콘은 **Iconify**(`iconify-icon` 웹컴포넌트)를 쓴다. Angular 컴포넌트에서 사용 시 `schemas: [CUSTOM_ELEMENTS_SCHEMA]` 필수. 레퍼런스가 다른 아이콘셋(lucide·heroicons·ionicons 등)을 쓰면 해당 아이콘을 Iconify 컬렉션 이름(`lucide:*`, `heroicons:*` 등)으로 매핑해 기록한다. primeicons(PrimeNG 내부)·ionicons(Ionic 내부)은 라이브러리 컴포넌트가 자체 요구하는 곳에만 남기고, **앱 레벨 아이콘은 Iconify로 통일**한다. 이 규칙은 design-rules.md·CLAUDE.md 마커 블록에도 포함시킨다.
+
 ---
 
 ## ⚡ 실행 절차
