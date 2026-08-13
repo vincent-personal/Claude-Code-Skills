@@ -169,6 +169,31 @@ VERIDA 앱 브라우저 검증을 **세 경로로 명시적으로 분리**한다
 
 ---
 
+### kai-peer-session
+
+두 에이전트(Claude Code · kai-gen)로 한 작업을 나눠 할 때, **같은 폴더 + 같은 세션 이름**을 열쇠로
+상대 세션의 대화를 찾아 읽어, 서로의 진행을 사람이 옮겨 적는 수고를 없앤다.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-peer-session-kaigen | `/kai-peer-session-kaigen` | **Claude Code에서** 호출 — 짝 kai-gen 세션을 읽고 숙지 |
+| kai-peer-session-claude | `/kai-peer-session-claude` | **kai-gen에서** 호출 — 짝 Claude Code 세션을 읽고 숙지 |
+
+**핵심 설계 원칙 (수정 시 반드시 유지):**
+
+1. **같은 폴더 + 같은 이름 = 짝** — cwd(realpath)와 세션 이름이 모두 일치해야 짝. 사용자의 이름 붙이기 습관이 유일한 계약
+2. **이름 자동 추정** — `--name` 생략 시 내 쪽 에이전트의 이 폴더 최신 기록 세션을 나로 판정(호출 순간 내 대화가 방금 기록됨). 추정 결과를 첫 줄에 출력, 어긋나면 `--name`으로 덮어쓰기
+3. **저장 구조 실측 고정** — Claude `~/.claude/projects/{cwd의 /→-}/{uuid}.jsonl`(이름은 `custom-title` > `agent-name` 레코드 — 이름 관련 줄만 선별 파싱해 대용량 비용 절감), kai-gen `~/.kai-gen/sessions/{ts}-{id}/meta.json`(name·cwd) + `transcript.jsonl`
+4. **thinking 블록 비전파** — 상대의 사고과정은 옮기지 않는다(사고과정은 결론이 아님). 도구 호출/결과는 클립(기본 200자/1200자·최근 120개, `--max-msgs 0`=전체)
+5. **읽기 전용 + 충돌 시 보고** — 상대 결론과 내 판단이 어긋나면 덮어쓰지 말고 사용자에게 알림. 상대 화면의 사실은 출처 명시("kai-gen 세션에 따르면 …")
+6. **자연어 트리거** — "카이젠(kaigen)으로부터"·"클로드로부터"·"○○가 한 작업 참조해서"·"○○ 쪽에서 뭐 했는지 봐줘" 등 상대 세션 참조 취지 발화만으로 발동(SKILL.md description에 트리거 예문 명시). **방향 주의**: Claude 세션에서는 `-kaigen`, kai-gen 세션에서는 `-claude`
+7. **스크립트 동반 링크** — install.sh가 SKILL.md와 `peer-session.py`를 스킬 폴더마다 함께 링크(SKILL.md에 적힌 경로 그대로 실행되도록)
+
+설치: `bash {repo}/kai-peer-session/install.sh` → `~/.claude/skills/kai-peer-session-{claude,kaigen}/` 링크.
+전제: 두 에이전트 세션에 **같은 이름**을 붙여야 짝을 찾는다. 진단: `peer-session.py --list`.
+
+---
+
 ## 작업 시 준수 규칙
 
 ### 1. 스킬 수정 시
