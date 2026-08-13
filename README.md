@@ -75,6 +75,29 @@ bash {이 repo}/kai-browser/install.sh
 - 두 모드는 독립적이다: node 모드는 공유 프로필을 쓰지 않고 매번 자체 인증(토큰 주입)하므로 MCP의 프로필 잠금과 충돌하지 않는다.
 - 전제: 글로벌 Playwright MCP(user scope) + 글로벌 `playwright` 라이브러리. 끊김 이력·재설치 경위는 `dev` 메모리 `project-playwright-mcp-setup` 참조.
 
+### kai-peer-session
+
+두 에이전트(Claude Code · kai-gen)로 한 작업을 나눠 할 때, 서로의 진행을 사람이 옮겨 적는 수고를 없앤다.
+**같은 폴더 + 같은 세션 이름**을 열쇠로 삼아 상대 세션의 대화를 찾아 읽는다.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-peer-session-kaigen | `/kai-peer-session-kaigen` | **Claude 에서 호출** — 같은 이름의 kai-gen 세션을 읽는다 |
+| kai-peer-session-claude | `/kai-peer-session-claude` | **kai-gen 에서 호출** — 같은 이름의 Claude Code 세션을 읽는다 |
+
+설치:
+```bash
+bash {이 repo}/kai-peer-session/install.sh
+```
+
+- 세션 이름 저장 위치: Claude 는 `~/.claude/projects/{cwd}/{uuid}.jsonl` 안의 `custom-title` 레코드
+  (파일명에 없다), kai-gen 은 `~/.kai-gen/sessions/{id}/meta.json` 의 `name`.
+- 이름 자동 추정: `--name` 이 없으면 **내 쪽 에이전트에서 가장 최근 기록된 세션**을 나로 본다.
+  스킬을 부르는 순간 내 대화가 기록되므로 대개 맞지만, 같은 폴더에 내 쪽 세션이 여럿이면
+  첫 줄의 추정 결과를 보고 `--name` 으로 덮어쓴다.
+- 진단: `python3 {이 repo}/kai-peer-session/peer-session.py --list` — 현재 폴더의 양쪽 이름 일람.
+- 상대의 thinking 은 옮겨오지 않는다(사고과정은 결론이 아니다). 도구 호출·결과는 길이를 잘라 요약.
+
 ---
 
 ## 다중 에이전트 안전성 설계
