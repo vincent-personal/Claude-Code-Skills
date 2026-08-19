@@ -41,7 +41,7 @@ allowed-tools:
 
 백그라운드 워커 (작업 1개 완수 후 조용히 종료)
   W-0:   작업 파일 Read + PROJECT_ROOT 결정
-  W-1:   컨벤션 Read + 자체 플랜 + (tier≥2) kai-gen MCP 교차 검증 + 코드 구현
+  W-1:   컨벤션 Read + 플랜 확정(스펙 채택 우선) + (조건부) kai-gen MCP 교차 검증 + 코드 구현
   W-2:   빌드 검증
   W-3:   git add → pull --rebase → commit → push
   W-4:   committed: 마커 + mv doing→done
@@ -323,7 +323,7 @@ bash CLI(codex)·`.plans/` 중간 파일 없음. tier≥2면 워커가 W-1에서
 2. impact_files Read — task 설명과 실제 파일 상태 비교·재해석
    (A→C인데 실제 파일이 B면 B→C로 구현; 재해석 불가 → `mv doing→blocked` + "BLOCKED: 시점불일치" 후 종료)
 
-3. **자체 플랜 수립 → (tier≥2) kai-gen 교차 검증** — kai-task-worker.md W-1 3·3.5 규칙대로: 플랜을 먼저 독립 수립(앵커링 방지) 후 kai_consult 1회, 유효 지적만 반영·기록.
+3. **플랜 확정 → (조건부) kai-gen 교차 검증** — kai-task-worker.md W-1 3·3.5 규칙대로: **스펙-코드 일치면 등록 스펙을 그대로 플랜으로 채택**(재수립 생략 · 등록 검증 있으면 `- 생략: 등록 검증 승계` 기록 후 재검증도 생략), 불일치·플랜 변경·등록 검증 부재일 때만 자체 플랜 수립 + kai_consult 1회.
 
 4. 새 파일 생성 시 impact_files에 append(Edit)
 
