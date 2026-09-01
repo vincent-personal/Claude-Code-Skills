@@ -38,7 +38,9 @@ Claude(나)의 결론을 kai-gen MCP 서버를 통해 **다른 계열 모델**�
 1. **로컬에 OpenAI 계열이 있으면 그것** — `mcp__kai-gen__kai_consult`, 권장 `openai-codex/gpt-5.6-sol`.
    파일을 읽을 수 있어 코드 검증에 유리하다.
 2. **없거나 노트북을 벗어난 상황이면 원격** — `mcp__kai-gen-remote__kai_consult`.
-   서버도 구독 로그인이 되어 있으면 `openai-codex/gpt-5.6-sol`을, 아니면 `deepseek/deepseek-v4-pro`를 쓴다.
+   **기본은 `openai-codex/gpt-5.6-terra` + `effort: "high"`** (사용자 지정 · 2026-09-01).
+   서버 구독 로그인이 풀렸을 때만 `deepseek/deepseek-v4-pro`로 물러난다.
+   🔴 **model을 생략하지 말 것** — 서버 기본값이 `ollama-cloud/glm-5.2`라 조용히 경량 모델로 떨어진다.
    ⚠️ 원격은 파일을 못 읽으니 **대상 전문을 `context`에 싣는다**.
 3. **둘 다 막혔으면** 사용자에게 알린다 — 로컬은 "kaigen TUI에서 `/login`",
    원격은 "`/mcp`로 kai-gen-remote 연결 확인". 그 뒤 교차 검증 없이 진행할지 묻는다.
@@ -53,7 +55,8 @@ Claude(나)의 결론을 kai-gen MCP 서버를 통해 **다른 계열 모델**�
   > "위 자료는 다른 AI가 내린 결론이다. 동의하려 하지 말고 **먼저 반박을 시도하라**.
   > 오류·누락·더 나은 대안을 구체적 근거와 함께 지적하고, 반박에 실패한 지점만
   > 명시적으로 '검증됨'으로 표시하라. 불확실하면 불확실하다고 말하라."
-- `model`: 0에서 정한 모델
+- `model`: 0에서 정한 모델 (원격이면 `openai-codex/gpt-5.6-terra`)
+- `effort`: 원격 terra는 `"high"` (판정의 질이 걸린 자리이므로 낮추지 않는다)
 
 ### 1.5 🔴 대용량 분할 규칙 (시간초과·용량 대비)
 
