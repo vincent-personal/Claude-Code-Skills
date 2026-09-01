@@ -241,3 +241,17 @@ Skills/
 | git push race condition (5개+ 에이전트) | `pull --rebase` + 3회 재시도, 그래도 빈번하면 에이전트 수 줄이기 |
 | 영향 파일 미기재 항목은 안전망 우회 | task-add가 의무화하지만 사용자가 임의 편집 시 무력화 |
 | 백그라운드 에이전트 5개 운영 시 충돌률↑ | **1~2개 운영 권장** |
+
+### kai-openai — 타 모델 교차 검증·토론
+
+Claude 의 결론을 **비-Anthropic 계열 모델**(OpenAI·DeepSeek·GLM 등)에게 적대적으로 검증받고,
+불일치 시 최대 3라운드 토론으로 수렴시킨다. kai-gen MCP 서버를 통해 호출한다.
+
+- 서버 둘: 로컬 `mcp__kai-gen__*`(stdio, 파일 읽기 가능) / 원격 `mcp__kai-gen-remote__*`(https://kaigen.kaifacun.com/mcp, 파일 못 읽음)
+- 전제: 그 기기의 Claude Code 에 kai-gen MCP 가 등록되어 있어야 한다(`/mcp` 로 확인).
+  원격은 Bearer 토큰이 필요하며, 토큰은 git 에 두지 않는다(kai-gen 저장소의 `.kaigen-remote.env`).
+
+설치:
+```bash
+ln -s {이 repo}/kai-openai/SKILL.md ~/.claude/skills/kai-openai/SKILL.md
+```
