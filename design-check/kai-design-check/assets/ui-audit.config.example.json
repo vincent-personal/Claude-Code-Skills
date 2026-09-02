@@ -1,0 +1,49 @@
+{
+  "$comment": "kai-ui-audit 설정. 프로젝트 루트에 ui-audit.config.json 으로 둔다.",
+
+  "port": 4499,
+  "buildCommand": "npx ng build",
+  "distDir": "dist/<앱이름>/browser",
+  "ssrEntry": "dist/<앱이름>/server/server.mjs",
+
+  "$widths": "320 을 반드시 넣는다 — 실결함이 가장 많이 나오는 폭이다",
+  "widths": [320, 390, 768, 1440],
+  "shortViewportAt": 320,
+
+  "$themes": "테마 전환 방식. cookie | attr | class | none",
+  "themes": [
+    { "name": "light", "cookie": { "name": "theme", "value": "light" } },
+    { "name": "dark", "cookie": { "name": "theme", "value": "dark" } }
+  ],
+
+  "$selectors": "프레임워크별 마커. 이동 성공 판정에 쓴다",
+  "selectors": {
+    "appRoot": "app-root",
+    "main": "main, [role=main]",
+    "scrim": "[data-scrim], .scrim, [aria-modal=true]"
+  },
+
+  "$screens": "감사할 화면 전수. name 은 보고용, url 은 실제 경로",
+  "screens": [
+    { "name": "홈", "url": "/" }
+  ],
+
+  "$overlays": "숨은 컴포넌트. openIdx 는 화면의 N번째 button 을 눌러 연다는 뜻(없으면 URL 만으로 열림)",
+  "overlays": [
+    { "name": "예: 옵션 시트", "url": "/product/1#option", "openIdx": null, "panel": ".sheet", "escape": true }
+  ],
+
+  "$stacks": "겹쳐 띄우는 조합. clicks 는 누를 button 인덱스 순서",
+  "stacks": [
+    { "name": "예: 서랍 → 확인창", "url": "/", "clicks": [7, 3] }
+  ],
+
+  "$modalPanels": "모달로 취급할 패널 선택자 (스크롤 잠금·Escape 검사 대상)",
+  "modalPanels": ".sheet, .dialog, .drawer, [role=dialog], [role=alertdialog]",
+
+  "$advisory": "실패가 아니라 경고로 둘 결함 종류",
+  "advisory": ["tap-touch"],
+
+  "$unknownUrls": "반드시 404 여야 하는 URL (소프트 404 검사)",
+  "unknownUrls": ["/definitely-not-a-real-route"]
+}

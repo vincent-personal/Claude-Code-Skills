@@ -27,6 +27,55 @@ bash /Volumes/KAIFACUN/Projects/Skills/meeting-to-spec/install.sh
 
 ---
 
+---
+
+### design-check
+
+이미 만들어진 프론트엔드의 **화면 전부를 계측**해 디자인 결함을 찾아 순서대로 고친다.
+Angular(SSR/CSR) · Ionic · React · Vue · Next · Svelte · **Flutter** · 네이티브 —
+데스크탑 브라우저든 모바일 브라우저든 모바일 네이티브든 표면을 가리지 않는다.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-design-check | `/kai-design-check [프로젝트경로]` | 표면 판별 → 계측 → 오탐 제거 → 레퍼런스 대조 → 수정 → 재계측 → 교차 검증 → 문서화 |
+
+잡는 것: 화면 벗어남 · 요소 겹침 · 고정 바에 가려짐 · 글자 잘림 · **색 대비(WCAG AA)** ·
+**패딩/정렬 근접 불일치(OCD 항목)** · 터치 타깃 · 오버레이(포커스·Escape·겹침) ·
+애니메이션(동작 줄이기) · SSR 상태코드 · **디자인 원본과의 글자 단위 대조**
+
+계측 어댑터 3종 + 대조기 1종:
+- `web/` DOM 좌표 (Angular·Ionic·React·Vue·Next)
+- `flutter/` 위젯 트리 rect + 프레임워크 오버플로 오류
+- `pixel/` 스크린샷 픽셀 — **표면 무관**, 네이티브도 된다
+- `refdiff/` 레퍼런스 ↔ 구현 글자 단위 대조
+
+설치:
+```bash
+bash /Volumes/KAIFACUN/Projects/Skills/design-check/install.sh
+```
+
+### database  🗄️ *(도메인 그룹)*
+
+**데이터베이스 도메인**의 스킬을 모으는 그룹. 앞으로 백업·복제·튜닝 등이 여기 붙는다.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-db-migration | `/kai-db-migration {어느 DB를 · 어디에서 · 어디로}` | DB 하나를 **완전 동일하게** 이전하고 **실측으로 증명** |
+
+스키마·테이블·컬럼·인덱스·제약·**외래키·뷰·프로시저·함수·트리거·이벤트** + **데이터 전량**을
+1:1 로 옮긴다. 9개 GATE 로 되어 있고, 핵심은 **GATE 2 대소문자(`lower_case_table_names`) 판정**이다 —
+이것을 먼저 재지 않으면 옮긴 뒤 앱이 `table doesn't exist` 로 깨진다. **실제로 겪었다.**
+
+검증은 3층 전부 통과해야 완료: **객체 수(종류별)** · **전 테이블 실제 `count(*)`** ·
+**🔴 앱 경로 그대로 실접속**. 행수만 맞으면 완료로 보고하지 않는다.
+
+설치:
+```bash
+bash /Volumes/KAIFACUN/Projects/Skills/database/install.sh
+```
+
+---
+
 ### task-manager
 
 **파일-per-task** 작업 관리. 어느 프로젝트에서도 `/kai-task-add`, `/kai-task-run`, `/kai-task-clear`, `/kai-task-list` 명령으로

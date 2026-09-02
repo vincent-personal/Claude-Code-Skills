@@ -44,6 +44,18 @@ Skills/                           ← 본 repo 루트
       m2s-tech.md                 ← Stage 4: Tech Lead + Solution Architect
       m2s-ceo.md                  ← Stage 5: CEO/Founder
       m2s-design.md               ← Stage 6: Product Design Lead
+  database/                       ← 스킬 그룹 N: 데이터베이스 **도메인 그룹**
+    install.sh
+    kai-db-migration/
+      SKILL.md                    ← /kai-db-migration (9 GATE 무손실 이전)
+      references/
+        mysql-traps.md            ← 실제로 겪은 MySQL 함정 12가지
+        queries.md                ← 인벤토리·검증 SQL 모음
+      assets/
+        _conn.sh                  ← 공통 접속 계층 (암호는 MYSQL_PWD 로만)
+        mysql-inventory.sh        ← 서버 실측 (lower_case_table_names 등)
+        mysql-objects.sh          ← 객체 인벤토리 (이름 문자열까지)
+        mysql-rowcount.sh         ← 전 테이블 실제 count(*)
   {other-skill-group}/            ← 향후 추가될 스킬 그룹
     install.sh
     {skill-name}/SKILL.md
@@ -53,6 +65,26 @@ Skills/                           ← 본 repo 루트
 ---
 
 ## 현재 등록된 스킬 그룹
+
+### database  🗄️ (도메인 그룹)
+
+**분야/도메인 단위 그룹의 첫 사례.** 앞으로 스킬이 늘어나면 `{도메인}/{스킬}/SKILL.md` 로 묶는다.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-db-migration | `/kai-db-migration {어느 DB를 · 어디에서 · 어디로}` | DB 무손실 이전 + 실측 증명 |
+
+**설계 원칙 (수정 시 지킬 것)**
+
+1. **추측 금지·실측 필수** — `lower_case_table_names`·버전·collation·`sql_mode` 는 양쪽을 **잰다**
+2. **GATE 2 가 심장부** — 대소문자 불일치는 **사용자 결정 사항**이다. 임의로 진행하지 않는다
+3. **완료의 정의는 3층** — 객체 수 + 전 테이블 `count(*)` + **실접속**.
+   행수만으로 "완벽" 이라 보고했다가 깨진 전례가 있다 (2026-08-31 `AHAJA_BIBLE`)
+4. **겪지 않은 절차는 쓰지 않는다** — 이 스킬의 신뢰는 "전부 실제로 밟았다" 에서 나온다.
+   엔진을 추가할 때도 `references/{engine}-traps.md` 에 **실측한 것만** 적는다
+5. **암호는 값이 아니라 위치** — 명령줄 `-p` 금지(프로세스 목록 노출), 문서엔 보관 위치만
+
+---
 
 ### task-manager
 
