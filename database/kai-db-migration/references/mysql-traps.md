@@ -195,3 +195,61 @@ cat dump.sql | mysql ... | tee restore.log     # ❌ tee 만 성공해도 전체
 `ssh host 'bash -s' <<EOF ... EOF` 로 스크립트를 stdin 에 먹이는 중에 `docker exec -i` 를
 부르면, **`-i` 가 남은 스크립트를 통째로 읽어 가서 그 뒤 줄이 조용히 실행되지 않는다.**
 SQL 을 `-e` 로 넘길 때는 `-i` 를 붙이지 않고 `< /dev/null` 을 둔다. **실제로 겪었다.**
+
+---
+
+# 2026-09-02 `go_easy` 이전에서 새로 겪은 것
+
+## 18. 🔴 `docker exec -e PW=값` 도 프로세스 목록에 암호를 드러낸다
+
+`mysql -p비밀` 이 위험하다는 것은 널리 알려져 있으나, **`docker exec -e MYSQL_PWD=비밀` 은
+안전해 보여서 더 위험하다.** 값이 docker CLI 의 argv 에 그대로 들어가므로 `ps` 에 뜬다.
+
+```
+$ pgrep -af mysqldump
+1081238 sudo docker exec -e MYSQL_PWD=<암호 그대로 보임> mysql mysqldump ...
+```
+
+**대응.** 컨테이너 안 셸이 **stdin 에서 한 줄 읽어 export** 하게 한다 (`assets/_conn.sh`).
+
+```bash
+printf '%s\n' "$PW" | docker exec -i "$C" \
+  sh -c 'IFS= read -r MYSQL_PWD; export MYSQL_PWD; exec mysql -h"$1" -u"$2" -e "$3"' _ "$H" "$U" "$SQL"
+```
+
+## 19. `mysql -B` 는 값 안의 탭을 `\t` 로 이스케이프한다
+
+인벤토리를 `CONCAT('X\t', a, '\t', b)` 로 만들면 **한 칸에 뭉개져** `X\ta\tb` 라는 문자열
+하나가 된다. 컬럼을 **나눠서 select** 하면 배치 모드가 진짜 탭으로 구분해 준다.
+
+## 20. `GROUP_CONCAT` 은 기본 1024바이트에서 **말없이 잘린다**
+
+전 테이블 `count(*)` SQL 을 `GROUP_CONCAT` 으로 조립하면 테이블 수십 개만 돼도 잘려
+`... FROM \`go_easy\`.\`customer_` 같은 깨진 SQL 이 나온다. 오류 메시지가 원인을 가리키지 않아
+헤맨다. **같은 세션에서 먼저 올린다** — `SET SESSION group_concat_max_len = 64*1024*1024;`
+
+## 21. `UNION` 은 정렬을 보장하지 않는다 — 내용이 같은데 diff 가 어긋난다
+
+DEFINER 목록을 `UNION ALL` 로 모으고 `ORDER BY` 를 빠뜨렸더니, 원본과 대상의 **내용은
+완전히 같은데** 순서가 달라 검증이 실패로 나왔다. 대조용 출력에는 **반드시 `ORDER BY`** 를 건다.
+
+## 22. 원본 트리거 본문의 `CRLF` 가 복원 시 `LF` 로 정규화된다
+
+`go_easy` 의 트리거 7개는 본문에 **CR(0x0D) 109개**를 담고 있었다(Windows 계열 클라이언트로
+만든 흔적). MySQL 8.4 로 복원하니 **CR 이 사라졌다.**
+
+- **의미는 동일하다** — CR 은 SQL 에서 공백이고, 주석 끝의 CR 도 무해하다
+- 그러나 **바이트 대조에서는 차이로 잡힌다.** 숨기지 말고 *"차이는 줄바꿈 문자뿐"* 이라고 보고한다
+- 판별법: `tr -d '\r'` 로 지우고 다시 비교한다.
+  ⚠️ `sed 's/\\r//g'` 는 **문자 두 개(`\`+`r`)** 를 찾으므로 듣지 않는다 — 실제 CR 은 한 바이트다
+
+## 23. 덤프 파일에 `tail -1` 을 쓰지 마라
+
+`mysqldump` 의 INSERT 한 줄은 **수 메가바이트**다. `tail -1` 하면 터미널이 그 한 줄로 뒤덮여
+다른 출력이 전부 묻힌다. **`tail -c 200`** 을 쓴다.
+
+## 24. `--single-transaction` 덤프는 원격이면 오래 걸린다 — 배경으로 돌려라
+
+15.9MB 짜리 DB 인데도 헬싱키→Azure(싱가포르) 왕복이라 **약 3분**이 걸렸다.
+전경에서 돌리면 툴 타임아웃에 걸린다. `nohup ... &` 로 띄우고 **프로세스 생존과
+`Dump completed` 로 판정**한다. 크기만 보면 진행 중인 파일을 완성본으로 오인한다.
