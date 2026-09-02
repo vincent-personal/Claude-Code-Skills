@@ -207,6 +207,16 @@ mysqldump --databases "$DB" \
   > "$WORK/$DB.sql"
 ```
 
+> 🔴 **대상 스키마 이름을 바꿀 것이면 `--databases` 를 쓰지 않는다.**
+> `--databases` 는 덤프에 `CREATE DATABASE` · `USE` 를 박아 넣어 다른 이름으로 복원할 수 없게 한다.
+> 이름을 바꾸려면 **스키마명을 위치 인자로** 주고(`mysqldump ... costra ...`), 대상에 새 이름의
+> 스키마를 만들어 `mysql -u.. costree < dump` 로 넣는다. **덤프를 뜨는 이 시점에 결정된다.**
+> 덤프 전체를 `sed` 로 치환하면 **데이터 속 문자열까지 바뀐다** — 상세: `references/mysql-traps.md` §28
+
+> ⚠️ **원격 대용량 덤프는 `setsid` 로 세션에서 떼어낸다.** `nohup` 은 SIGHUP 만 막고
+> **SIGTERM 은 못 막아**, ssh 가 끊기면 덤프가 완결 마커 없이 죽는다. 파일은 남으므로 속는다.
+> 끝나면 `.done` 파일에 종료코드를 남겨 폴링을 확실히 한다 — §27
+
 | 플래그 | 없으면 |
 |---|---|
 | `--routines` | **프로시저·함수가 통째로 사라진다** |

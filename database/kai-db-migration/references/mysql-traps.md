@@ -296,3 +296,53 @@ mysql-lcs1   메모리 664 MiB / 디스크 933 MB   — 2시간 방치
 **교훈.** 리허설은 DB 를 **통째로 한 벌 더** 담으므로 자원 부담이 크다.
 만들 때 이름을 `*-rehearsal` 로 짓고 **철거를 GATE 9-A 로 예약**한다.
 지우기 전에는 **본체가 기대 상태인지 반드시 확인**한다 — 아니면 그 리허설이 마지막 사본일 수 있다.
+
+---
+
+# 2026-09-02 `costra` → `costree` 이전에서 새로 겪은 것
+
+## 27. 🔴 ssh 로 띄운 배경 덤프는 `nohup` 만으로 살아남지 못한다
+
+`costra`(212MB+) 덤프를 `nohup ... &` 로 띄웠는데, 원격 명령이 타임아웃으로 끊기자
+**mysqldump 가 완결 마커 없이 죽었다.** 파일은 212,210,574 바이트로 남아 있어
+**얼핏 성공한 것처럼 보였다.**
+
+- `nohup` 은 **SIGHUP 만** 무시한다. 세션이 죽을 때 오는 **SIGTERM 은 못 막는다**
+- 결과물은 남으므로 **크기만 보면 속는다** (함정 7 과 같은 함정, 다른 원인)
+
+**대응.** `setsid` 로 **새 세션·새 프로세스 그룹**을 만들어 완전히 떼어내고,
+끝나면 **`.done` 파일에 종료코드와 끝부분을 남겨** 폴링이 확실해지게 한다.
+
+```bash
+setsid nohup /path/to/dump-inner.sh </dev/null >/dev/null 2>&1 &
+disown
+# inner 스크립트 끝에서:
+echo "exit=$rc size=$(stat -c%s "$OUT")" > "$OUT.done"; tail -c 60 "$OUT" >> "$OUT.done"
+```
+
+**판정은 `.done` + `Dump completed` 로 한다. 프로세스 부재나 파일 크기로 하지 않는다.**
+
+## 28. 🔴 스키마 **이름을 바꾸어** 옮길 때는 덤프를 sed 로 치환하지 마라
+
+`costra` → `costree` 처럼 이름을 바꿔야 할 때, 덤프 전체에 `sed s/costra/costree/g` 를
+돌리고 싶어진다. **데이터 행 안의 문자열까지 바뀐다** — URL·설명문·로그·JSON 어디에나
+옛 이름이 들어 있을 수 있고, 바뀐 것을 되돌릴 방법이 없다.
+
+**올바른 순서**
+
+1. **`--databases` 를 쓰지 않고** 스키마명을 위치 인자로 준다
+   → 덤프에 `CREATE DATABASE` · `USE` 문이 **생기지 않는다**
+   ```bash
+   mysqldump ... costra --routines --triggers --events ...   # --databases 없음
+   ```
+2. 대상에 **새 이름의 스키마를 직접 만든다** (원본과 같은 charset·collation)
+3. `mysql -u... costree < dump` — 연결된 스키마로 들어간다
+4. **DDL 안의 스키마 한정자만 정밀 치환**한다 — 뷰·트리거·프로시저는
+   `` `costra`.`tbl` `` 처럼 백틱으로 감싼 형태로 스키마를 박아 둔다
+   ```bash
+   sed 's/`costra`\./`costree`./g'     # 백틱+점 조합만. 평문 costra 는 건드리지 않는다
+   ```
+5. 치환 전 `.orig` 를 남기고, **치환 건수와 대상 줄을 보고**한다
+
+⚠️ `--databases` 를 쓴 덤프에는 `CREATE DATABASE \`costra\`` 가 박혀 있어
+이 방법을 쓸 수 없다. **덤프를 뜨는 시점에 이미 결정된다** — GATE 4 에서 정할 것.
