@@ -20,10 +20,13 @@ MY_SUDO="${MY_SUDO:-sudo}"
 myq() {
   # $1 = SQL. 결과는 탭 구분·헤더 없음(-N -B) — diff 로 대조하기 좋다
   if [ -n "${MY_DOCKER:-}" ]; then
-    $MY_SUDO docker exec -e MYSQL_PWD="$MYSQL_PWD" -i "$MY_DOCKER" \
-      mysql -h"$MY_HOST" -P"$MY_PORT" -u"$MY_USER" -N -B --default-character-set=utf8mb4 -e "$1"
+    # ⚠️ -i 를 붙이지 않는다. SQL 은 -e 로 넘기므로 stdin 이 필요 없고,
+    #    -i 를 붙이면 docker exec 가 stdin 을 삼켜 **호출한 스크립트의 나머지 줄이 사라진다**
+    #    (ssh 'bash -s' <<EOF 처럼 스크립트를 stdin 으로 먹이는 경우 실제로 겪었다).
+    $MY_SUDO docker exec -e MYSQL_PWD="$MYSQL_PWD" "$MY_DOCKER" \
+      mysql -h"$MY_HOST" -P"$MY_PORT" -u"$MY_USER" -N -B --default-character-set=utf8mb4 -e "$1" < /dev/null
   else
     MYSQL_PWD="$MYSQL_PWD" mysql -h"$MY_HOST" -P"$MY_PORT" -u"$MY_USER" \
-      -N -B --default-character-set=utf8mb4 -e "$1"
+      -N -B --default-character-set=utf8mb4 -e "$1" < /dev/null
   fi
 }

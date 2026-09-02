@@ -91,6 +91,8 @@ SELECT VERSION()                    AS version,
 - [ ] `sql_mode` (`ONLY_FULL_GROUP_BY` 등이 다르면 **기존 쿼리가 런타임에 깨진다**)
 - [ ] 대상 **디스크 여유** ≥ 덤프 크기 × 3 (덤프 + 복원 중 InnoDB + 여유)
 - [ ] 원본 → 대상 **네트워크 도달 가능**한가 (덤프를 어디서 뽑을지 결정)
+- [ ] **비 InnoDB 테이블이 있는가** → 있으면 `--single-transaction` 이 그 테이블을 보호하지 못한다
+- [ ] 대상 **`@@restrict_fk_on_non_standard_key`** (8.4+) ← GATE 3.5 의 입력
 
 **🚦 게이트: 원본·대상 실측값을 표로 사용자에게 보고한다.**
 
@@ -123,9 +125,27 @@ SELECT VERSION()                    AS version,
 
 - [ ] 결정과 근거를 **문서에 적는다** (다음 사람이 다시 조사하지 않도록)
 
+> **정확히 알아 둘 것.** 문제가 되는 것은 **테이블명·스키마명**이다. MySQL 의 **컬럼 식별자
+> 자체는** 어느 설정에서도 대소문자를 구분하지 않는다. 다만 **컬럼 alias · JSON 키 ·
+> 동적 SQL 문자열 · 드라이버/ORM 의 결과 매핑**은 별개의 규칙을 따르므로 **앱 호환성 검증
+> 대상**이다(GATE 7-3).
+>
+> ⚠️ 또한 원본이 `lcs=1` 이면 **원래 선언 철자가 이미 소실**되어 있다. 덤프에는 소문자만
+> 남으므로, 앱이 `PascalCaseTable` 을 참조한다면 **덤프만 봐서는 문제를 못 본다.**
+> 반드시 **앱/ORM 이 쓰는 철자**를 함께 확인한다.
+
 ---
 
 ### GATE 3 — 사전 인벤토리 (덤프 **전**에 원본 기준선을 고정한다)
+
+> 🔴 **기준선과 덤프는 같은 시점이어야 한다.**
+> `--single-transaction` 이 지켜 주는 것은 **InnoDB 행 데이터**뿐이다. 인벤토리를 잰 뒤
+> 덤프를 뜨는 사이에 앱이 쓰기를 계속하면, GATE 7 의 불일치가 **이전 실패인지 정상 운영 변경인지
+> 판별할 수 없다.** DDL(`ALTER`/`CREATE`/`DROP`)은 `--single-transaction` 으로도 보호되지 않는다.
+>
+> - [ ] **컷오버 덤프 구간에는 원본 쓰기·DDL 을 멈춘다.** 멈춘 시각과 방법을 기록한다
+> - [ ] 멈출 수 없으면 → **리허설 이전**으로 규정하고, 컷오버 때 정지 구간에서 다시 뜬다.
+>       "멈추지 않고 뜬 덤프" 를 최종본으로 쓰지 않는다
 
 ```bash
 bash assets/mysql-objects.sh   <원본별칭> <DB> > /tmp/src.objects
@@ -142,6 +162,33 @@ bash assets/mysql-rowcount.sh  <원본별칭> <DB> > /tmp/src.rowcount
       > ⚠️ 덤프는 `DEFINER='user'@'host'` 를 그대로 담는다. 대상에 그 계정이 없으면
       > 객체는 만들어져도 **실행 시점에 권한 오류**가 난다
 - [ ] 원본 사용자·권한(`SHOW GRANTS`)과 **인증 플러그인**을 기록
+
+---
+
+### GATE 3.5 — 사전 호환성 검사 (⚠️ **덤프보다 먼저**)
+
+> 덤프를 뜬 뒤에 비호환을 발견하면 **정지 시간 안에서 덤프 텍스트를 급하게 편집**하게 된다.
+> 고칠 것은 **뜨기 전에** 다 찾아 둔다.
+
+- [ ] **비표준 외래키 전수 식별** — 참조 컬럼에 UNIQUE/PRIMARY 가 없는 FK
+      (쿼리: `references/queries.md`)
+- [ ] **대상의 `@@restrict_fk_on_non_standard_key` 를 실측**한다 (8.4 기본 `ON`)
+      → `OFF` 로 두면 **제약을 지우지 않고 그대로 이전**할 수 있다. **이것이 1순위다**
+      → 제약 삭제는 **스키마 의미 변경**이다. 최후의 수단이며 사용자 승인이 필요하다
+- [ ] **예약어가 된 식별자** · 제거된 `sql_mode` 값 · `utf8mb3` · 잘못된 뷰/루틴
+      → 가능하면 MySQL Shell `util.checkForServerUpgrade()` 를 돌린다
+- [ ] **인증 플러그인** — 원본 계정별 `plugin` 조회. 대상에서 쓸 수 있는가
+- [ ] **DEFINER 는 `user@host` 전체가 계정**이다. `'a'@'localhost'` 와 `'a'@'%'` 는 다른 계정이다
+- [ ] **named 타임존 사용 여부** (`CONVERT_TZ` 등) → 쓰면 대상에 `mysql.time_zone*` 적재 필요
+- [ ] 최대 행/BLOB 크기 vs 양쪽 `max_allowed_packet`
+
+---
+
+### GATE 3.6 — 🔴 복원 리허설 (**운영 인스턴스가 첫 시험장이 되어서는 안 된다**)
+
+- [ ] **임시 인스턴스**(대상과 같은 버전·같은 `lcs`)에 덤프를 **먼저 복원**한다
+- [ ] 여기서 나오는 오류·경고를 **전부** 해소한 뒤에야 대상을 건드린다
+- [ ] 리허설 결과로 GATE 5 의 교정 목록을 확정한다
 
 ---
 
@@ -166,8 +213,18 @@ mysqldump --databases "$DB" \
 | `--set-gtid-purged=OFF` | 대상에서 GTID 충돌 |
 | `--column-statistics=0` | 8.0 클라이언트가 구버전 서버를 덤프할 때 오류 |
 
-- [ ] 덤프 **직후 크기와 `tail`** 을 확인한다 — 정상 종료면 끝에 `Dump completed` 가 있다
+- [ ] **종료코드를 본다.** `mysqldump ... > f` 의 exit code 가 0 인가 (파이프를 쓰면 `PIPESTATUS`)
+- [ ] 덤프 **끝줄에 `Dump completed`** 가 있는가
       > ⚠️ 중간에 끊긴 덤프도 파일은 남는다. **크기만 보고 성공으로 치지 않는다**
+- [ ] **덤프 안의 객체 수가 인벤토리와 맞는가** — 텍스트로 직접 센다
+      ```bash
+      grep -c '^CREATE TABLE'      "$WORK/$DB.sql"
+      grep -c 'CREATE.*PROCEDURE'  "$WORK/$DB.sql"
+      grep -c 'CREATE.*FUNCTION'   "$WORK/$DB.sql"
+      grep -c 'CREATE.*TRIGGER'    "$WORK/$DB.sql"
+      grep -c 'CREATE.*EVENT'      "$WORK/$DB.sql"
+      ```
+- [ ] `sha256sum` 을 기록한다 (`.orig` 와 교정본 각각)
 - [ ] 원본을 **건드리지 않았음**을 확인 (덤프는 읽기 전용 작업이다)
 
 ---
@@ -182,13 +239,17 @@ cp "$WORK/$DB.sql" "$WORK/$DB.sql.orig"
 
 **실제로 겪은 비호환** (상세: `references/mysql-traps.md`)
 
-- [ ] **`mysql_native_password`** — MySQL 8.4 에서 **제거**되었다. 이 플러그인을 쓰던 계정은
-      그대로 옮기면 **접속 자체가 안 된다** → 대상에 `caching_sha2_password` 계정을 새로 만든다
-- [ ] **유일하지 않은 컬럼을 참조하는 외래키** — 8.0 은 허용했으나 **8.4 는 거부**한다.
-      부모 컬럼에 UNIQUE 가 없으면 제약 생성이 실패한다
-      → 값 분포를 조사해 UNIQUE 승격이 **가능한지 먼저 확인**하고, 불가능하면
-        **`CONSTRAINT` 줄만 제거하고 `KEY` 인덱스는 남긴다** (조회 성능 유지)
-      → **몇 건을 왜 제외했는지 반드시 보고**한다. 조용히 빼면 안 된다
+- [ ] **`mysql_native_password`** — MySQL **8.4 에서 기본 비활성화**(제거는 9.0)이다.
+      이 플러그인을 쓰던 계정은 대상에서 **그대로는 접속이 안 된다**
+      → 대상에 `caching_sha2_password` 계정을 새로 만든다. 드라이버가 이를 지원하는지
+        (그리고 TLS/RSA 키 교환 설정이 되는지) **함께 확인**한다
+- [ ] **유일하지 않은 컬럼을 참조하는 외래키** — 8.0 은 허용, 8.4 는 기본값에서 거부한다.
+      **순서를 지킨다:**
+      1. 대상 **`restrict_fk_on_non_standard_key=OFF`** → **제약을 그대로 살려 이전**한다 ← 1순위
+      2. 값 분포상 **UNIQUE 승격이 가능**하면 승격
+      3. 둘 다 안 되면 **`CONSTRAINT` 줄만 제거하고 `KEY` 인덱스는 남긴다**
+         → 🔴 이것은 **스키마 의미 변경**이다. 사용자 승인 + 예외 대장 기록 + 고아 데이터
+           검증 쿼리를 함께 남긴다. **몇 건을 왜 뺐는지 반드시 보고**한다
 - [ ] **DEFINER** — 대상에 없는 계정이면 계정을 만들거나 DEFINER 를 치환
 - [ ] `utf8mb3` · 제거된 `sql_mode` 값 · 예약어가 된 식별자
 
@@ -205,6 +266,9 @@ docker exec -i <컨테이너> sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"' \
 ```
 
 - [ ] **`restore.log` 를 끝까지 읽는다.** `ERROR` 가 하나라도 있으면 **완료가 아니다**
+- [ ] **종료코드를 확인한다.** ⚠️ `cat f | mysql ... | tee log` 처럼 파이프로 엮으면
+      **마지막 명령의 성공이 전체 성공으로 보인다.** `PIPESTATUS` 를 검사하거나 리다이렉트를 쓴다
+- [ ] `--force` 를 쓰지 않는다 (첫 오류에서 멈춰야 문제를 본다)
 - [ ] 대용량이면 `max_allowed_packet` · `innodb_buffer_pool_size` 를 먼저 확인
 
 ---
@@ -220,8 +284,22 @@ bash assets/mysql-objects.sh <대상별칭> <DB> > /tmp/dst.objects
 diff -u /tmp/src.objects /tmp/dst.objects     # 차이 0 이어야 통과
 ```
 
-- [ ] 테이블 · 뷰 · **프로시저** · **함수** · **트리거** · **이벤트** · 외래키 · 인덱스
+- [ ] 테이블 · 뷰 · **프로시저** · **함수** · **트리거** · **이벤트** · 외래키 ·
+      **CHECK 제약** · **파티션** · 인덱스 · **생성컬럼**
 - [ ] **이름 문자열까지 대조**한다 (개수만 맞고 이름이 다를 수 있다 — 대소문자!)
+
+**7-1B. 객체 *정의 본문* — 이름만 같고 속이 다를 수 있다**
+
+```bash
+bash assets/mysql-ddl.sh <원본별칭> <DB> > /tmp/src.ddl
+bash assets/mysql-ddl.sh <대상별칭> <DB> > /tmp/dst.ddl
+diff -u /tmp/src.ddl /tmp/dst.ddl
+```
+
+- [ ] 컬럼 기본값 · `EXTRA`(`ON UPDATE`·`GENERATED`·`INVISIBLE`) · CHECK 식 · 파티션 경계 ·
+      뷰 SQL 본문 · 루틴 본문 · **트리거 본문과 실행 순서(`ACTION_ORDER`)** · 인덱스 prefix 길이·방향
+- [ ] ⚠️ `DEFINER` · `SQL SECURITY` · `sql_mode` · charset/collation 은 **정규화해서 지우지 않는다** —
+      그것이 진짜 차이다. `AUTO_INCREMENT=` 값 정도만 무시한다
 
 **7-2. 전 테이블 행수 — 실제 `count(*)`**
 
@@ -230,10 +308,32 @@ bash assets/mysql-rowcount.sh <대상별칭> <DB> > /tmp/dst.rowcount
 diff -u /tmp/src.rowcount /tmp/dst.rowcount   # 차이 0 이어야 통과
 ```
 
+**7-2B. 🔴 데이터 *내용* — 행수 일치는 내용 일치가 아니다**
+
+한 행이 지워지고 다른 행이 들어가도 **수는 같다.** 값 변조·인코딩 깨짐·시간대 변환·
+`NULL`↔빈문자열 뒤바뀜은 행수로 절대 안 잡힌다.
+
+```bash
+bash assets/mysql-checksum.sh <원본별칭> <DB> > /tmp/src.ck
+bash assets/mysql-checksum.sh <대상별칭> <DB> > /tmp/dst.ck
+diff -u /tmp/src.ck /tmp/dst.ck
+```
+
+- [ ] 불일치 테이블이 나오면 **PK 순 정렬 해시로 재확인**한다 (`references/queries.md`)
+- [ ] ⚠️ 체크섬은 **원본이 정지된 같은 기준점**에서 떠야 의미가 있다 (GATE 3 의 정지 구간)
+
+**7-2C. 무결성**
+
+- [ ] 제거·변경한 제약이 있으면 **고아 데이터 검증 쿼리**를 돌린다
+- [ ] `AUTO_INCREMENT` 다음 값이 원본 이상인가 (낮으면 **키 충돌이 난다**)
+
 **7-3. 🔴 실접속 — 앱이 실제로 붙어 쿼리가 도는가**
 
-- [ ] **앱이 붙을 그 경로 그대로** 접속한다 (도커 네트워크 내부 이름 · 그 계정 · 그 암호)
-- [ ] 대표 테이블 조회 + **프로시저 1개 실제 호출** + 뷰 1개 조회
+- [ ] **앱이 붙을 그 경로 그대로** 접속한다 (도커 네트워크 내부 이름 · 그 계정 · 그 암호 · 그 드라이버)
+- [ ] 읽기: 대표 테이블 조회 · **모든 뷰** 최소 1회 조회 · **모든 루틴** 호출(위험하면 대표 다수)
+- [ ] 쓰기: **트리거를 발동시키는 INSERT/UPDATE** 를 넣고 결과 확인 → 롤백
+- [ ] **앱이 실제로 쓰는 철자 그대로** 쿼리해 본다 (ORM 이 `PascalCase` 를 쓰면 그대로)
+      > 🔴 지난번 실패의 정확한 지점이다. `lcs` 불일치는 **여기서만** 드러난다
 - [ ] ⚠️ **이 단계 없이는 완료 보고 금지.** 행수·객체 수가 다 맞아도 여기서 깨진 전례가 있다
 
 ---
@@ -244,6 +344,9 @@ diff -u /tmp/src.rowcount /tmp/dst.rowcount   # 차이 0 이어야 통과
 - [ ] 연결 문자열을 사용자에게 전달 — **암호는 값 대신 보관 위치**를 알린다
 - [ ] 포트를 **외부에 열지 않는다.** 외부 도구는 SSH 터널 경유
 - [ ] 이전 결과 문서를 남긴다 (원본/대상 · 객체 표 · 행수 · **제외·변경한 것** · 접속 정보)
+- [ ] 🔴 **보고 문구를 정확히 쓴다.** 의도적 차이(FK 제거·DEFINER 치환·charset 변환)가
+      **하나라도 있으면 "완전 동일" 이라 쓰지 않는다.**
+      → *"데이터 내용과 객체 집합·정의를 검증했으며, 명시한 N건의 의도적 차이를 제외하고 동등하다"*
 
 ---
 
@@ -266,6 +369,10 @@ diff -u /tmp/src.rowcount /tmp/dst.rowcount   # 차이 0 이어야 통과
 7. ❌ **대상의 기존 스키마를 승인 없이 DROP·덮어쓰기**
 8. ❌ **원본을 즉시 삭제하기.** 백엔드 검증 완료까지 유지
 9. ❌ **`--routines --triggers --events` 중 하나라도 빠뜨리기**
+10. ❌ **운영 중인 공유 인스턴스를 첫 복원 시험장으로 쓰기** — 리허설(GATE 3.6)이 먼저다
+11. ❌ **원본 쓰기를 멈추지 않고 뜬 덤프를 최종본으로 쓰기** — 기준선이 흔들려 검증이 무의미해진다
+12. ❌ **비호환 교정을 덤프 뒤로 미루기** — 정지 시간 안에서 덤프를 급히 편집하게 된다
+13. ❌ **의도적 차이가 있는데 "완전 동일" 이라 보고하기**
 
 ---
 
@@ -273,7 +380,11 @@ diff -u /tmp/src.rowcount /tmp/dst.rowcount   # 차이 0 이어야 통과
 
 - `references/mysql-traps.md` — MySQL 8.0 → 8.4 실측 함정 전체
 - `references/queries.md` — 인벤토리·검증 SQL 모음
-- `assets/mysql-inventory.sh` · `mysql-objects.sh` · `mysql-rowcount.sh` — 계측 헬퍼
+- `assets/mysql-inventory.sh` — 서버 실측
+- `assets/mysql-objects.sh` — 객체 인벤토리 (이름·컬럼·인덱스·FK·CHECK·파티션·DEFINER)
+- `assets/mysql-ddl.sh` — 객체 **정의 본문** (`SHOW CREATE`)
+- `assets/mysql-rowcount.sh` — 전 테이블 실제 `count(*)`
+- `assets/mysql-checksum.sh` — 테이블별 **데이터 내용** 체크섬
 
 > **엔진 확장 시**: 이 SKILL.md 의 GATE 구조는 엔진 무관이다. 엔진별 상세는
 > `references/{engine}-traps.md` 로 추가한다. **겪지 않은 절차는 쓰지 않는다** —
