@@ -40,6 +40,9 @@ const args = process.argv.slice(2);
 const dark = args.includes('--dark');
 const only = (args.find((a) => a.startsWith('--only=')) ?? '').slice(7);
 const BASE = cfg.appBase || `http://localhost:${cfg.port}`;
+// map 항목은 [이름, 경로] 또는 [이름, 경로, 앱쪽_여는_버튼번호].
+// 🔴 오버레이(서랍·시트·다이얼로그·토스트)도 **반드시** map 에 넣는다 —
+//    레퍼런스 캔버스는 대개 오버레이를 별도 '화면'으로 그려 두므로 같은 방식으로 대조된다.
 const MAP = R.map.filter(([l]) => !only || l.includes(only));
 const FRAME = R.frame || { width: 390, height: 844 };
 const FLOAT = R.floating || '';
@@ -133,7 +136,7 @@ for (const t of (R.appInit || [])) await appCtx.addInitScript(t);
 const appPage = await appCtx.newPage();
 
 const results = [];
-for (const [label, route] of MAP) {
+for (const [label, route, openIdx] of MAP) {
   const ok = await refPage.evaluate(({ sel, l }) => {
     const hit = [...document.querySelectorAll(sel)].find((b) => (b.textContent || '').includes(l));
     if (hit) { hit.click(); return true; }
@@ -165,6 +168,11 @@ for (const [label, route] of MAP) {
 
   await appPage.goto(BASE + route, { waitUntil: 'networkidle' }).catch(() => {});
   await appPage.waitForTimeout(500);
+  // 오버레이라면 눌러서 연다 (스크림에 막히므로 JS 로 직접 누른다)
+  if (openIdx !== undefined && openIdx !== null) {
+    await appPage.evaluate((i) => document.querySelectorAll('button')[i]?.click(), openIdx);
+    await appPage.waitForTimeout(500);
+  }
   await appPage.evaluate(() => document.fonts.ready);
   // 🔴 아이콘이 자리를 잡을 때까지 기다린다. 폭 0 인 채로 재면
   //    그 옆 글자가 아이콘 너비만큼 밀린 것으로 **잘못** 잡힌다.

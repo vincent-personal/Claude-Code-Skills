@@ -1,49 +1,182 @@
 {
   "$comment": "kai-ui-audit 설정. 프로젝트 루트에 ui-audit.config.json 으로 둔다.",
-
   "port": 4499,
   "buildCommand": "npx ng build",
   "distDir": "dist/<앱이름>/browser",
   "ssrEntry": "dist/<앱이름>/server/server.mjs",
-
   "$widths": "320 을 반드시 넣는다 — 실결함이 가장 많이 나오는 폭이다",
-  "widths": [320, 390, 768, 1440],
+  "widths": [
+    320,
+    390,
+    768,
+    1440
+  ],
   "shortViewportAt": 320,
-
   "$themes": "테마 전환 방식. cookie | attr | class | none",
   "themes": [
-    { "name": "light", "cookie": { "name": "theme", "value": "light" } },
-    { "name": "dark", "cookie": { "name": "theme", "value": "dark" } }
+    {
+      "name": "light",
+      "cookie": {
+        "name": "theme",
+        "value": "light"
+      }
+    },
+    {
+      "name": "dark",
+      "cookie": {
+        "name": "theme",
+        "value": "dark"
+      }
+    }
   ],
-
   "$selectors": "프레임워크별 마커. 이동 성공 판정에 쓴다",
   "selectors": {
     "appRoot": "app-root",
     "main": "main, [role=main]",
     "scrim": "[data-scrim], .scrim, [aria-modal=true]"
   },
-
   "$screens": "감사할 화면 전수. name 은 보고용, url 은 실제 경로",
   "screens": [
-    { "name": "홈", "url": "/" }
+    {
+      "name": "홈",
+      "url": "/"
+    }
   ],
-
-  "$overlays": "숨은 컴포넌트. openIdx 는 화면의 N번째 button 을 눌러 연다는 뜻(없으면 URL 만으로 열림)",
+  "$overlays": "🔴 **전수로 채운다.** 화면 프로브는 오버레이를 한 번도 열지 않는다 — 여기 없으면 영원히 검사되지 않는다. openIdx = 그 화면의 N번째 button 을 눌러 연다(없으면 URL 만으로 열림). escape=false 는 토스트·스피너처럼 Escape 로 닫히지 않는 것.",
   "overlays": [
-    { "name": "예: 옵션 시트", "url": "/product/1#option", "openIdx": null, "panel": ".sheet", "escape": true }
+    {
+      "name": "확인 다이얼로그",
+      "url": "/orders",
+      "openIdx": 4,
+      "panel": "[role=dialog]",
+      "escape": true
+    },
+    {
+      "name": "경고 다이얼로그",
+      "url": "/settings",
+      "openIdx": 2,
+      "panel": "[role=alertdialog]",
+      "escape": true
+    },
+    {
+      "name": "바텀시트",
+      "url": "/product/1#option",
+      "openIdx": null,
+      "panel": ".sheet",
+      "escape": true
+    },
+    {
+      "name": "액션시트",
+      "url": "/orders",
+      "openIdx": 6,
+      "panel": ".action-sheet",
+      "escape": true
+    },
+    {
+      "name": "사이드 서랍",
+      "url": "/",
+      "openIdx": 0,
+      "panel": ".drawer",
+      "escape": true
+    },
+    {
+      "name": "팝오버·드롭다운",
+      "url": "/products",
+      "openIdx": 3,
+      "panel": ".popover",
+      "escape": true
+    },
+    {
+      "name": "토스트(성공)",
+      "url": "/feedback",
+      "openIdx": 1,
+      "panel": ".toast",
+      "escape": false
+    },
+    {
+      "name": "토스트(오류)",
+      "url": "/feedback",
+      "openIdx": 2,
+      "panel": ".toast",
+      "escape": false
+    },
+    {
+      "name": "메시지 박스",
+      "url": "/feedback",
+      "openIdx": 5,
+      "panel": ".message-box",
+      "escape": true
+    },
+    {
+      "name": "전역 로딩 스피너",
+      "url": "/feedback",
+      "openIdx": 6,
+      "panel": ".spinner",
+      "escape": false
+    },
+    {
+      "name": "목록 스켈레톤",
+      "url": "/orders?state=loading",
+      "openIdx": null,
+      "panel": ".skeleton",
+      "escape": false
+    },
+    {
+      "name": "빈 상태",
+      "url": "/orders?state=empty",
+      "openIdx": null,
+      "panel": ".empty",
+      "escape": false
+    }
   ],
-
   "$stacks": "겹쳐 띄우는 조합. clicks 는 누를 button 인덱스 순서",
   "stacks": [
-    { "name": "예: 서랍 → 확인창", "url": "/", "clicks": [7, 3] }
+    {
+      "name": "예: 서랍 → 확인창",
+      "url": "/",
+      "clicks": [
+        7,
+        3
+      ]
+    }
   ],
-
   "$modalPanels": "모달로 취급할 패널 선택자 (스크롤 잠금·Escape 검사 대상)",
   "modalPanels": ".sheet, .dialog, .drawer, [role=dialog], [role=alertdialog]",
-
   "$advisory": "실패가 아니라 경고로 둘 결함 종류",
-  "advisory": ["tap-touch"],
-
+  "advisory": [
+    "tap-touch"
+  ],
   "$unknownUrls": "반드시 404 여야 하는 URL (소프트 404 검사)",
-  "unknownUrls": ["/definitely-not-a-real-route"]
+  "unknownUrls": [
+    "/definitely-not-a-real-route"
+  ],
+  "$reference": "디자인 원본이 있을 때만. 자세한 것은 references/reference-diff.md",
+  "reference": {
+    "url": "file:///…/디자인.html",
+    "frame": {
+      "width": 390,
+      "height": 844
+    },
+    "screenSwitch": "aside button",
+    "themeToggle": {
+      "dark": "button[aria-label='dark theme']",
+      "light": "button[aria-label='light theme']"
+    },
+    "statusBar": true,
+    "appRoot": "app-root",
+    "floating": "footer, .tabbar, .toast, .fab",
+    "skipInBoxes": "[hidden], .drawer-closed",
+    "safeAreaBottom": 34,
+    "iconsReady": "app-icon",
+    "map": [
+      [
+        "대시보드",
+        "/tabs/home"
+      ],
+      [
+        "주문",
+        "/tabs/orders"
+      ]
+    ]
+  }
 }
