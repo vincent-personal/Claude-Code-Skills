@@ -26,7 +26,7 @@ allowed-tools:
 ```
 메인 세션 (얇은 루프 · 잡당 Bash 1~2회 + 스폰 1회)
   Step 0: 화해(doing 잔류 정리) + user.lock 확인          ← 진입 1회
-  Step 1: FIFO 선점 (todo 최고참 → mv doing)              ← 순차 1개씩
+  Step 1: FIFO 선점 (todo 최고참 → mv doing) + 병합 스캔(중복·동일범위·연속수정 ≤4건 함께)
   Step 2: 난이도 판정(frontmatter+보충만) → 모델 선택
   Step 3: 워커 스폰(run_in_background) → 턴 종료 대기
   Step 4: 완료 알림 → done/blocked 확인·보고 → Step 1 로
@@ -66,7 +66,7 @@ ls "{SESSION_ROOT}"/docs/jobs/todo/*.md 2>/dev/null | wc -l
 
 0개면 `"✅ 잡 없음"` 출력 후 종료.
 
-### Step 1 — FIFO 선점 (Bash 1회)
+### Step 1 — FIFO 선점 + 병합 스캔 (Bash 1~2회)
 
 ```bash
 f=$(ls "{SESSION_ROOT}"/docs/jobs/todo/*.md 2>/dev/null | sort | head -1)
@@ -74,6 +74,25 @@ f=$(ls "{SESSION_ROOT}"/docs/jobs/todo/*.md 2>/dev/null | sort | head -1)
 ```
 
 `NONE` → `"✅ 모든 잡 완료"` 후 종료.
+
+**1-M. 병합 스캔** — 남은 todo 가 있으면 frontmatter 만 훑어 (본문 Read 금지):
+```bash
+for t in "{SESSION_ROOT}"/docs/jobs/todo/*.md; do
+  [ -e "$t" ] || continue
+  echo "== $(basename "$t")"; awk '/^---$/{c++;next} c==1' "$t"
+done
+```
+선점한 잡(title·files)과 **아래 기준 중 하나**에 해당하는 잡을 병합 대상으로 판단한다 (보수적으로 — 애매하면 병합하지 않는다):
+- **중복**: 사실상 같은 요구
+- **동일 범위**: 같은 파일/컴포넌트/화면을 고치는 요구
+- **연속 수정**: 같은 기능에 대한 이어지는 개선 (뒤 잡이 앞 잡의 결과를 덮어쓰는 관계 포함)
+
+병합 대상은 **최대 4개까지**(선점분 포함 5개) 함께 선점한다:
+```bash
+mv "{SESSION_ROOT}/docs/jobs/todo/{대상}" "{SESSION_ROOT}/docs/jobs/doing/{대상}"
+```
+→ `MERGE` 목록에 담아 Step 3 워커에 전달. `🔗 병합: {N}건 — {제목들}` 한 줄 보고.
+서로 무관한 잡은 절대 묶지 않는다 (실패 시 동반 blocked 되는 비용이 이득보다 크다).
 
 ### Step 2 — 난이도 판정 → 모델 라우팅 (파일 본문 전체를 읽지 않는다 — frontmatter + ## 보충 까지만)
 
@@ -97,7 +116,14 @@ Agent({
 
 SESSION_ROOT: {SESSION_ROOT}
 JOB_FILE: {SESSION_ROOT}/docs/jobs/doing/{CLAIMED}
-난이도: {easy|hard|max}
+MERGE_FILES: {병합 대상 doing/ 경로들 — 없으면 "없음"}
+난이도: {easy|hard|max — 병합 시 전체 합산 기준}
+
+## W-0.5 — 병합 (MERGE_FILES 있을 때만)
+MERGE_FILES 전부 Read → 요구를 JOB_FILE 기준으로 통합 이해한다:
+- 중복 요구는 1회로, 연속 수정은 **최종 상태 기준**으로 (앞 잡을 만들고 뒤 잡이 덮어쓰는 낭비 금지).
+- 상충하면 **나중 등록(파일명 뒤쪽)이 우선** — 사용자의 더 최신 의사다.
+- 작업 목록·구현·결과는 JOB_FILE(최고참) 하나에서 진행한다.
 
 ## W-1 — 분석 + 작업 목록 (추측 금지 · 추적 필수)
 1. JOB_FILE 전체 Read. files 후보(`?` 포함)를 Grep/Glob 로 실제 파일로 확정.
@@ -135,8 +161,14 @@ ToolSearch `select:mcp__kai-gen__kai_consult` (없으면 `mcp__kai-gen-remote__k
    - {무엇을 바꿨는지 2~4줄}
    - 커밋: {short hash}
    ```
-3. `mv "{JOB_FILE}" "{SESSION_ROOT}/docs/jobs/done/$(basename {JOB_FILE})"` → 확인 후 조용히 종료.
-doing/ 에 남긴 채 종료 절대 금지 (성공=done, 실패=blocked).
+3. MERGE_FILES 가 있으면 각 부속 파일에도 `## 결과` append 후 함께 이동:
+   ```
+   ## 결과
+   - {JOB_FILE 의 id} 에 병합 처리됨
+   - 커밋: {short hash}
+   ```
+4. `mv "{JOB_FILE}" "{SESSION_ROOT}/docs/jobs/done/$(basename {JOB_FILE})"` (부속 파일도 전부 done/) → 확인 후 조용히 종료.
+doing/ 에 남긴 채 종료 절대 금지 (성공=done, 실패=blocked — **병합분 전원 동일 상태**, blocked 시 각 파일에 사유 기록).
   """
 })
 ```
@@ -150,8 +182,9 @@ doing/ 에 남긴 채 종료 절대 금지 (성공=done, 실패=blocked).
 b="{CLAIMED}"
 if [ -e "{SESSION_ROOT}/docs/jobs/done/$b" ]; then echo "DONE"; tail -6 "{SESSION_ROOT}/docs/jobs/done/$b"
 elif [ -e "{SESSION_ROOT}/docs/jobs/blocked/$b" ]; then echo "BLOCKED"; tail -4 "{SESSION_ROOT}/docs/jobs/blocked/$b"
-else echo "STALE"; mv "{SESSION_ROOT}/docs/jobs/doing/$b" "{SESSION_ROOT}/docs/jobs/todo/$b" 2>/dev/null; fi
+else echo "STALE"; for d in "{SESSION_ROOT}"/docs/jobs/doing/*.md; do [ -e "$d" ] && mv "$d" "{SESSION_ROOT}/docs/jobs/todo/$(basename "$d")"; done; fi
 ```
+(STALE = 워커가 결과 없이 죽음 — 병합 부속 포함 doing 잔류 전부를 todo 복귀시켜 재실행)
 `✅/⚠️ {title}` 한 줄 보고 (STALE 은 todo 복귀 보고) → **Step 1 로 돌아가 다음 잡** (user.lock 재확인). todo 가 비면 종료.
 
 ---
@@ -159,7 +192,8 @@ else echo "STALE"; mv "{SESSION_ROOT}/docs/jobs/doing/$b" "{SESSION_ROOT}/docs/j
 ## Red Lines (절대 금지)
 
 - ❌ 워커가 `Agent()` 호출 (체인 금지) / 메인이 구현·분석을 직접 수행 (컨텍스트 오염)
-- ❌ 병렬 스폰 — 잡은 언제나 동시 1개 (순서 보존이 존재 이유)
+- ❌ 병렬 스폰 — 워커는 언제나 동시 1개 (순서 보존이 존재 이유. 병합은 워커 1개가 여러 잡 파일을 처리하는 것 — 병렬이 아니다)
+- ❌ 무관한 잡 병합·5개 초과 병합 — 중복/동일 범위/연속 수정만, 애매하면 각자 처리
 - ❌ 작업 목록 없이 구현 착수 / 목록 밖 스코프 확장
 - ❌ easy 잡에 kai_consult·opus/fable 낭비 — 라우팅 표를 따른다 (애매하면 위로)
 - ❌ `git add -A` · heredoc 커밋 · dev 서버 시작 · `git worktree add`/`cp`/`rsync`

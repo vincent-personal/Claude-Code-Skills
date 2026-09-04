@@ -144,6 +144,7 @@ Skills/                           ← 본 repo 루트
 6. **자체 완결** — 워커 지침은 SKILL.md 인라인 프롬프트 (kai-task-worker 등 에이전트 파일 미사용)
 7. **화해 규칙** — run 진입 시 doing/ 잔류: `- 커밋:` 해시 있으면 done, 없으면 todo 복귀(재실행)
 8. 운용 전제: **run 단일 세션·순차, add 다중 세션 허용** (task-manager 와 동일)
+9. **claim 시 병합** — run 이 유일 소비자이므로 선점 시 todo frontmatter 를 훑어 중복·동일 범위·연속 수정 잡을 최대 4건 함께 선점, 워커 1개가 통합 처리(상충 시 나중 등록 우선 — 최신 의사). 부속 잡도 각자 done/ 에 결과 기록(병합 출처 명시). 무관한 잡 병합 금지 — 실패 시 동반 blocked 비용이 이득보다 큼
 
 설치: `bash {repo}/job-manager/install.sh` → `~/.claude/skills/kai-job-{add,run}/SKILL.md` 링크.
 
