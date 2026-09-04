@@ -125,6 +125,30 @@ Skills/                           ← 본 repo 루트
 
 ---
 
+### job-manager  ⚡ (task-manager 의 경량 쌍둥이)
+
+**속도 최우선** 잡 큐. task-manager 와 같은 디렉터리 상태 모델(`docs/jobs/{todo,doing,done,blocked}`)이되, 등록·실행을 극단적으로 얇게 만든 **자체 완결 쌍** (타 스킬·에이전트 정의·외부 스크립트 무의존).
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-job-add | `/kai-job-add {명령}` | 초경량 등록 — 백그라운드 워커(sonnet 고정)가 빠른 스캔(검색 4회 상한·Read 0회) 후 잡 파일 생성, 메인은 즉시 턴 종료 |
+| kai-job-run | `/kai-job-run` | FIFO 순차 실행 — 얇은 루프가 난이도 판정 후 워커를 모델 라우팅(easy=sonnet/hard=opus/max=fable)으로 스폰. 워커가 추적 기반 작업 목록 작성→(hard·max만 kai_consult)→체크오프 구현→빌드→커밋→**목록 삭제+결과 요약**→done/ |
+
+**핵심 설계 원칙 (수정 시 반드시 유지):**
+
+1. **무거운 판단은 run 에서 한 번만** — add 는 advisor·교차검증·Tier·병합 스캔·ready 플래그 전부 없음 (staging→원자적 mv 만으로 부분 파일 노출 방지)
+2. **순차 1개 = 설계** — 병렬 슬롯·영향파일 충돌 검사·폴링 스크립트 불필요. 순서 보존이 존재 이유
+3. **모델 라우팅** — 등록=sonnet 고정, 실행=난이도별(easy sonnet/hard opus/max fable, 애매하면 위로)
+4. **교차 검증은 hard·max 만** — kai-gen MCP(로컬 우선·remote 폴백)는 있으면 쓰는 선택 도구, 실패는 기록 후 자체 진행
+5. **done 파일은 가볍게** — 작업 목록은 완수 후 삭제, `## 결과` 요약(2~4줄+커밋 해시)만 잔존
+6. **자체 완결** — 워커 지침은 SKILL.md 인라인 프롬프트 (kai-task-worker 등 에이전트 파일 미사용)
+7. **화해 규칙** — run 진입 시 doing/ 잔류: `- 커밋:` 해시 있으면 done, 없으면 todo 복귀(재실행)
+8. 운용 전제: **run 단일 세션·순차, add 다중 세션 허용** (task-manager 와 동일)
+
+설치: `bash {repo}/job-manager/install.sh` → `~/.claude/skills/kai-job-{add,run}/SKILL.md` 링크.
+
+---
+
 ### design-sync
 
 레퍼런스(HTML 파일 또는 프로젝트)에서 디자인 시스템을 추출하여 Angular V21 + Tailwind V4 + PrimeNG V21 프로젝트에 완전히 동일한 테마로 적용하는 파이프라인.

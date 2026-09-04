@@ -76,6 +76,25 @@ bash /Volumes/KAIFACUN/Projects/Skills/database/install.sh
 
 ---
 
+### job-manager
+
+task-manager 의 **경량 쌍둥이** — 속도 최우선 잡 큐. 같은 디렉터리 상태 모델(`docs/jobs/`)을 쓰되
+등록은 초경량(백그라운드 sonnet 워커, 검색 4회 상한), 실행은 순차 1개씩 난이도별 모델 라우팅
+(easy=sonnet / hard=opus / max=fable) 워커가 추적 기반 작업 목록을 만들어 체크오프로 완수한다.
+완수 후 목록은 지우고 `## 결과` 요약만 남겨 done/ 으로. 교차 검증(kai-gen)은 hard·max 만.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-job-add | `/kai-job-add {명령}` | 명령 → 빠른 스캔 → 잡 파일 등록 (즉시 턴 종료) |
+| kai-job-run | `/kai-job-run` | FIFO 순차 완수 (분석→목록→구현→빌드→커밋→결과 요약) |
+
+설치:
+```bash
+bash {이 repo}/job-manager/install.sh
+```
+
+---
+
 ### task-manager
 
 **파일-per-task** 작업 관리. 어느 프로젝트에서도 `/kai-task-add`, `/kai-task-run`, `/kai-task-clear`, `/kai-task-list` 명령으로
