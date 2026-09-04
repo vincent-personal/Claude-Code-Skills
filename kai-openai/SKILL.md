@@ -18,8 +18,8 @@ Claude(나)의 결론을 kai-gen MCP 서버를 통해 **다른 계열 모델**�
 
 | 서버 | 접두사 | 무엇이 다른가 |
 |---|---|---|
-| **로컬**(stdio, 기본) | `mcp__kai-gen__*` | 구독 모델(`openai-codex/gpt-5.6-sol`)을 쓰고 **파일을 읽는다**(read·grep·glob·ls) |
-| **원격**(https://kaigen.kaifacun.com/mcp) | `mcp__kai-gen-remote__*` | 기본 `openai-codex/gpt-5.6-terra`·effort `high`. 구독+API 키 모두. ⚠️ **파일을 못 읽는다**(원격 프로파일) |
+| **로컬**(stdio, 기본) | `mcp__kai-gen__*` | 구독 모델(권장 `openai-codex/gpt-6-astra`)을 쓰고 **파일을 읽는다**(read·grep·glob·ls) |
+| **원격**(https://kaigen.kaifacun.com/mcp) | `mcp__kai-gen-remote__*` | 권장 `openai-codex/gpt-6-astra`·effort `high` (서버 env 기본은 terra — 명시 지정 권장). 구독+API 키 모두. ⚠️ **파일을 못 읽는다**(원격 프로파일) |
 
 | 도구 | 용도 |
 |---|---|
@@ -35,12 +35,14 @@ Claude(나)의 결론을 kai-gen MCP 서버를 통해 **다른 계열 모델**�
 ### 0. 가용성 확인
 `kai_status` 호출로 무엇이 살아 있는지 보고 **아래 순서로** 고른다.
 
-1. **로컬에 OpenAI 계열이 있으면 그것** — `mcp__kai-gen__kai_consult`, 권장 `openai-codex/gpt-5.6-sol`.
-   파일을 읽을 수 있어 코드 검증에 유리하다.
+1. **로컬에 OpenAI 계열이 있으면 그것** — `mcp__kai-gen__kai_consult`, 권장 `openai-codex/gpt-6-astra`
+   (GPT-6 Astra · 2026-09-03 출시, 2026-09-05 실호출 확인). 파일을 읽을 수 있어 코드 검증에 유리하다.
+   Astra가 에러(계정 미개방·롤아웃 전)면 `openai-codex/gpt-5.6-sol` 로 폴백.
 2. **없거나 노트북을 벗어난 상황이면 원격** — `mcp__kai-gen-remote__kai_consult`.
-   **기본은 `openai-codex/gpt-5.6-terra` + `effort: "high"`** (사용자 지정 · 2026-09-01).
+   **권장 `openai-codex/gpt-6-astra` + `effort: "high"`**, 실패 시 `openai-codex/gpt-5.6-terra` 폴백
+   (terra는 사용자 지정 · 2026-09-01 — 서버 env 기본값이기도 하다).
    서버 구독 로그인이 풀렸을 때만 `deepseek/deepseek-v4-pro`로 물러난다.
-   서버 env 도 같은 값으로 맞춰 두었으므로(`KAI_MODEL`·`KAI_EFFORT`, 실측 확인) 생략해도 terra/high 로 돈다.
+   서버 env 는 terra/high 로 맞춰져 있어(`KAI_MODEL`·`KAI_EFFORT`, 실측 확인) 생략하면 terra 로 돈다 — Astra 를 쓰려면 명시해야 한다.
    🔴 그래도 **model·effort 를 명시하는 편이 안전하다** — 서버 기본값은 운영자가 언제든 바꿀 수 있고,
    다른 기기·다른 서버에 붙었을 때 조용히 다른 모델로 떨어지는 것을 눈치채기 어렵다.
    `usedModel` 을 응답에서 반드시 확인해 보고에 적는다.
@@ -58,8 +60,8 @@ Claude(나)의 결론을 kai-gen MCP 서버를 통해 **다른 계열 모델**�
   > "위 자료는 다른 AI가 내린 결론이다. 동의하려 하지 말고 **먼저 반박을 시도하라**.
   > 오류·누락·더 나은 대안을 구체적 근거와 함께 지적하고, 반박에 실패한 지점만
   > 명시적으로 '검증됨'으로 표시하라. 불확실하면 불확실하다고 말하라."
-- `model`: 0에서 정한 모델 (원격이면 `openai-codex/gpt-5.6-terra`)
-- `effort`: 원격 terra는 `"high"` (판정의 질이 걸린 자리이므로 낮추지 않는다)
+- `model`: 0에서 정한 모델 (권장 `openai-codex/gpt-6-astra`, 폴백 sol/terra)
+- `effort`: 원격은 `"high"` (판정의 질이 걸린 자리이므로 낮추지 않는다)
 
 ### 1.5 🔴 대용량 분할 규칙 (시간초과·용량 대비)
 
