@@ -42,7 +42,7 @@ Claude(나)의 결론을 kai-gen MCP 서버를 통해 **다른 계열 모델**�
    **권장 `openai-codex/gpt-6-astra` + `effort: "high"`**, 실패 시 `openai-codex/gpt-5.6-terra` 폴백
    (terra는 사용자 지정 · 2026-09-01 — 서버 env 기본값이기도 하다).
    서버 구독 로그인이 풀렸을 때만 `deepseek/deepseek-v4-pro`로 물러난다.
-   서버 env 는 terra/high 로 맞춰져 있어(`KAI_MODEL`·`KAI_EFFORT`, 실측 확인) 생략하면 terra 로 돈다 — Astra 를 쓰려면 명시해야 한다.
+   서버 env 는 terra/medium 으로 맞춰져 있어(`KAI_MODEL`·`KAI_EFFORT`, 실측 확인) 생략하면 terra 로 돈다 — Astra 를 쓰려면 명시해야 한다.
    🔴 그래도 **model·effort 를 명시하는 편이 안전하다** — 서버 기본값은 운영자가 언제든 바꿀 수 있고,
    다른 기기·다른 서버에 붙었을 때 조용히 다른 모델로 떨어지는 것을 눈치채기 어렵다.
    `usedModel` 을 응답에서 반드시 확인해 보고에 적는다.
