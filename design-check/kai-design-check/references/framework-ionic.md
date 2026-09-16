@@ -68,6 +68,76 @@ ion-searchbar::part(icon)  { color: var(--x); }
 ```
 🔑 Ionic 은 `--ion-safe-area-*` 를 채워 준다. 웹 브라우저에서는 비어 있으므로 `env()` 를 폴백으로 함께 쓴다.
 
+### N5-A. 🔴 `ion-header` **없는** 화면이 노치·다이나믹 아일랜드에 가림
+
+**증상** 로그인·스플래시·대시보드처럼 헤더를 안 쓰고 **본문 첫 블록에 로고·제목**을 두는 화면에서
+그 첫 요소가 상단 노치에 잘린다.
+
+**원인** Ionic 은 상단 인셋을 **`ion-header` 에만** 넣어 준다. 헤더가 없으면 아무도 노치를 피하지 않는다.
+
+🔴 **브라우저에서는 절대 드러나지 않는다** — `--ion-safe-area-top` 이 0 이라 웹으로만 보면 멀쩡하다.
+실사고(2026-09-03): 로그인 로고가 iPhone 다이나믹 아일랜드에 가렸는데 **웹 감사 47화면은 전부 통과**였다.
+시뮬레이터를 켜서야 드러났다.
+
+**수정** — 화면마다 붙이지 말고 **전역 한 줄**로. `:has()` 로 헤더가 있는 화면은 건드리지 않는다(두 번 밀린다).
+```css
+/* src/global.scss */
+ion-router-outlet > .ion-page:not(:has(> ion-header)) > ion-content {
+  --padding-top: var(--ion-safe-area-top, env(safe-area-inset-top, 0px));
+}
+```
+🔑 `ion-content` 는 Shadow DOM 이라 `padding-top` 이 아니라 **`--padding-top` 커스텀 속성**을 줘야 한다(N1).
+🔑 `env()` 를 폴백으로 함께 둔다 — Ionic 이 값을 못 채운 순수 웹뷰에서도 동작한다.
+
+**검증** — `audit-safe-area.mjs` 가 자동으로 잡는다. 손으로 볼 때는:
+```js
+await page.goto(url);                      // ① 먼저 연다
+await page.evaluate(() =>                  // ② 뜬 **뒤** 노치를 심는다
+  document.documentElement.style.setProperty('--ion-safe-area-top', '59px'));
+const top = await page.evaluate(() => document.querySelector('kfc-logo').getBoundingClientRect().top);
+// top < 59 이면 결함. (실측 예: 48px → 107px 로 교정)
+```
+
+#### ⚠️ 이 검사를 만들 때 실제로 밟은 함정 둘 — 되풀이하지 말 것
+
+1. **`addInitScript` 로 노치를 심으면 거짓 통과한다.** Ionic 초기화가 `--ion-safe-area-top` 을 0 으로
+   덮어쓴다. **페이지가 뜬 뒤** `page.evaluate` 로 심어야 한다.
+2. **상단 검사를 스크롤 뒤에 하면 거짓 결함이 쏟아진다.** 끝까지 굴린 화면에서는 첫 요소가 위로 밀려나
+   `top` 이 음수가 되어 "657px 가림" 같은 값이 나온다. **상단은 스크롤 전에** 잰다.
+
+### N5-B. 🔴 `mode: 'md'` 를 고정하면 **앱바가 상태바에 겹친다**
+
+**증상** 안드로이드(또는 md 를 고정한 iOS)에서 앱바 제목·뒤로가기 화살표가
+시계·배터리 바로 밑에 딱 붙어 **겹쳐 보인다**. 화면 하나가 아니라 **헤더 쓰는 화면 전부**가 그렇다.
+
+**원인** Ionic 이 `ion-header` 에 상태바 인셋을 넣어 주는 것은 **ios 모드의 동작**이다.
+`provideIonicAngular({ mode: 'md' })` 로 고정하면 그 처리가 사라진다.
+게다가 **안드로이드는 targetSdk 35+ 부터 edge-to-edge 가 강제**라 웹뷰가 상태바 아래까지 그려진다.
+
+🔴 브라우저에서는 인셋이 0 이라 **여기서도 드러나지 않는다**(N5-A 와 같은 함정).
+실사고(2026-09-03): 에뮬레이터에서 "Create your account" 가 상태바에 붙어 있었다.
+
+**수정** — 전역 세 줄. 화면마다 붙이지 않는다.
+```css
+/* src/global.scss */
+/* ① 헤더가 있는 화면 — 앱바가 상태바를 피한다 */
+ion-router-outlet > .ion-page > ion-header {
+  padding-top: var(--ion-safe-area-top, env(safe-area-inset-top, 0px));
+}
+/* ② 헤더가 없는 화면 — 본문 첫 블록이 노치를 피한다(N5-A) */
+ion-router-outlet > .ion-page:not(:has(> ion-header)) > ion-content {
+  --padding-top: var(--ion-safe-area-top, env(safe-area-inset-top, 0px));
+}
+/* ③ 전체화면 시트·모달의 헤더도 같다 */
+ion-modal ion-header {
+  padding-top: var(--ion-safe-area-top, env(safe-area-inset-top, 0px));
+}
+```
+⚠️ `ion-toolbar` 가 아니라 **`ion-header` 에 준다** — 그 안에 무엇을 넣든(커스텀 앱바 포함) 함께 내려간다.
+
+**검증** — 실기기·에뮬레이터에서 앱바 첫 요소의 `top` 이 상태바 높이보다 큰지 본다.
+안드로이드는 `adb shell screencap` 으로 눈으로 확인하는 편이 빠르다.
+
 ### N6. `fullscreen="true"` 를 안 줘서 헤더 아래가 비거나, 줘서 내용이 헤더에 가림
 `<ion-content fullscreen="true">` 는 내용을 헤더 **아래로 흘려보낸다**(iOS 큰 제목용).
 헤더가 반투명이 아니면 첫 줄이 가린다. 상단 여백을 함께 조정한다.

@@ -105,10 +105,31 @@ const AUDIT = (SEL) => {
     }
   }
 
+
+  /**
+   * 🔴 **글자 검사 대상을 태그 목록으로 고르면 안 된다.**
+   *
+   * `span, p, h1..h4, button, a, label` 만 보던 시절, 캡션·본문을 `<div>` 로 쓰는 앱에서
+   * **대비 검사가 통째로 빠졌다** — 라임 배경 위 흰 글자(실측 1.12:1, 사실상 안 보임)를
+   * 계측기가 "0건 통과"로 넘겼고 **사용자가 스크린샷으로 지적해서야** 드러났다
+   * (실사고 2026-09-03 · Ionic 앱 `.pk-caption`·`.pk-muted`·`.card__caption`).
+   *
+   * 태그가 아니라 **직계 텍스트 노드를 가진 요소 전부**를 본다. 자식이 있어도
+   * 자기 텍스트가 있으면 대상이다(`<div>제목<span>배지</span></div>` 의 "제목").
+   */
+  const textElements = () => [...document.querySelectorAll('body *')].filter((el) => {
+    if (el.closest('script, style, template, svg')) return false;
+    return [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+  });
+  /** 그 요소의 **직계** 텍스트만 (자식 텍스트를 끌어오면 엉뚱한 색·크기로 잰다) */
+  const ownText = (el) =>
+    [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim();
+
   // ④ 텍스트 잘림 (말줄임 없이 넘침)
-  document.querySelectorAll('span, p, h1, h2, h3, h4, button, a').forEach((el) => {
-    if (!visible(el) || el.children.length) return;
-    if (!el.textContent.trim()) return; // 글자가 없으면 잘릴 것도 없다 (히트영역 ::after 오탐 방지)
+  issues.push({ t: '_stat', el: 'text-clip', d: String(textElements().length) });
+  textElements().forEach((el) => {
+    if (!visible(el)) return;
+    if (!ownText(el)) return; // 글자가 없으면 잘릴 것도 없다 (히트영역 ::after 오탐 방지)
     const s = getComputedStyle(el);
     if (s.overflow === 'hidden' || s.textOverflow === 'ellipsis') return;
     if (el.scrollWidth > el.clientWidth + 2 && el.clientWidth > 0)
@@ -261,9 +282,10 @@ const AUDIT = (SEL) => {
   };
   const bgOf = (el) => relLum(bgStack(el));
 ;
-  document.querySelectorAll('span, p, h1, h2, h3, h4, button, a, label').forEach((el) => {
-    if (!visible(el) || el.children.length) return;
-    const txt = el.textContent.trim();
+  issues.push({ t: '_stat', el: 'contrast', d: String(textElements().length) });
+  textElements().forEach((el) => {
+    if (!visible(el)) return;
+    const txt = ownText(el);
     if (!txt) return;
     if (el.closest('[disabled], [aria-disabled="true"]')) return; // 비활성 컨트롤은 WCAG 면제
     const cs = getComputedStyle(el);
