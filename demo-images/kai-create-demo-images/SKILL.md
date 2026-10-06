@@ -1,6 +1,6 @@
 ---
 name: kai-create-demo-images
-description: 앱의 기능 하나를 홍보 카드용 자료 한 벌로 만든다 — 그 프로젝트의 docs/screenshots/<기능>/ 폴더를 만들고, iOS 시뮬레이터(필요하면 안드로이드 에뮬레이터·브라우저)에서 기능을 실제로 조작하며 화면을 차례로 캡처하고, 조작 설명서(README.md)와 인스타 캐러셀용 인물 이미지 3장(시작·중간·끝)의 단독 생성 프롬프트(promo-image-prompts.md)를 쓴다. 폴더는 git 에서 뺀다. 트리거 - /kai-create-demo-images <기능 설명>, "이 기능 시연 캡처해줘", "홍보 카드 자료 만들어줘", "기능 스크린샷이랑 설명 만들어줘"
+description: 앱의 기능 하나를 홍보 카드용 자료 한 벌로 만든다 — 그 프로젝트의 docs/screenshots/<기능>/ 폴더를 만들고, iOS 시뮬레이터(필요하면 안드로이드 에뮬레이터·브라우저)에서 기능을 실제로 조작하며 화면을 차례로 캡처하고, 조작 설명서(README.md)와 인스타 캐러셀용 인물 이미지 3장(시작·중간·끝)의 단독 생성 프롬프트(promo-image-prompts.md)를 쓴다. 인물 옵션(성별 여/남 · 머리 · 안경 · 환경 방/교회/카페/랜덤)은 사용자가 지정하지 않은 항목만 시작 시 1회 질문. 폴더는 git 에서 뺀다. 트리거 - /kai-create-demo-images <기능 설명>, "이 기능 시연 캡처해줘", "홍보 카드 자료 만들어줘", "기능 스크린샷이랑 설명 만들어줘"
 ---
 
 # kai-create-demo-images — 기능 하나를 홍보 카드 자료로
@@ -48,6 +48,23 @@ docs/screenshots/<slug>/
 - **진입점 → 동작 → 결과**를 3~6단계 시나리오로 적는다. 이것이 캡처 순서이자 README 의 '어떻게 쓰나요' 표가 된다.
 - 기능이 데이터가 쌓여야 보이는 종류(기록·목록)면, 시연 중에 **데이터를 쌓는 단계부터** 넣는다.
 - 슬러그는 영어 kebab-case(예: `slot-history`).
+
+### ①-b 인물 옵션 확인 (유일하게 묻는 단계 — AskUserQuestion 1회)
+
+홍보 인물 이미지(⑥)의 옵션 중 **사용자가 아직 지정하지 않은 항목만** 골라 질문 1회로 받아둔다.
+긴 시연·캡처(④)를 시작하기 **전에** 물어 두는 것 — 캡처 도중 멈춰 서지 않기 위함이다.
+
+| 항목 | 선택지 |
+|---|---|
+| 성별 | **여성** (30대 초반 한국 여성) / **남성** (30대 초반 한국 남성 — 잘생기고 부드러운 인상) |
+| 머리 | 긴 머리 / 짧은·단정한 머리 / 랜덤(알아서) |
+| 안경 | 없음 / 안경 착용 / 랜덤(알아서) |
+| 환경 | 방(집) / 교회 / 카페 / 랜덤(기능 맥락에 맞게) |
+
+- 네 항목이 전부 이미 지정돼 있으면 질문을 **생략**한다. 일부만 지정됐으면 빠진 항목만 묻는다.
+- "랜덤"으로 받은 항목은 **기능의 맥락**(어떤 앱·어떤 상황의 기능인지)에 어울리게 스킬이 정하고,
+  정한 값을 ⑦ 보고에 명시한다 (예: 교회 앱 헌금 기능 → 환경 '교회').
+- 질문이 불가능한 완전 자율 실행이면 기본값: **여성 · 머리 랜덤 · 안경 없음 · 환경 랜덤**.
 
 ### ② 폴더 준비
 
@@ -106,9 +123,12 @@ $SIM shot <udid> "$OUT/01-<what>.png"
 ### ⑥ promo-image-prompts.md — 인물 이미지 3장
 
 - **3장: 시작(문제 상황) · 중간(기능을 쓰는 순간) · 끝(해결된 편안함)**. 캐러셀의 처음·가운데·마지막에 들어간다.
-- 인물은 사용자가 따로 말하지 않으면 **30대 초반 한국 여성**.
+- **인물·환경은 ①-b 에서 받은 선택을 그대로 쓴다**:
+  - 성별 — 여성 = `a Korean woman in her early 30s` / 남성 = `a handsome Korean man in his early 30s with a soft, gentle demeanor`
+  - 머리·안경 — 선택값을 **인물 묘사 문단에 포함**시켜 세 장 동일하게 (예: `long dark hair` · `wearing simple round glasses`)
+  - 환경 — 세 장의 공통 무대. 방 = `in a cozy sunlit room at home` / 교회 = `inside a warm, modern church interior` / 카페 = `at a quiet neighborhood cafe`. 장면 감정에 따라 **구도·시간대·빛만** 바꾸고 장소는 유지한다 (랜덤이면 ①-b 에서 정한 값 사용)
 - 🔴 **각 프롬프트는 단독으로 완결**되어야 한다 — 다른 프롬프트를 참조하지 않는다.
-  같은 사람처럼 보이도록 **인물 묘사 문단(나이·머리·옷)을 세 프롬프트에 글자 그대로** 넣는다.
+  같은 사람처럼 보이도록 **인물 묘사 문단(나이·머리·안경·옷)을 세 프롬프트에 글자 그대로** 넣는다.
 - **휴대폰 화면은 보이지 않게**(뒤집기·눈부심·각도) — 생성기가 앱 UI·글자를 엉터리로 그린다. 실제 화면은 캡처 카드가 맡는다.
 - **문구를 얹을 빈자리**(위 또는 아래 1/3)를 지정한다. 비율 **4:5 (1080×1350)**.
 - 프롬프트는 **영어**(생성 품질이 가장 안정적), 장면마다 **한국어 요약**을 붙인다.
@@ -120,14 +140,17 @@ $SIM shot <udid> "$OUT/01-<what>.png"
 프롬프트 한 장의 골격:
 
 ```
-A warm, natural lifestyle photograph of a Korean woman in her early 30s <장소·시간>. <인물 묘사 문단 — 세 장 동일>.
-She holds a smartphone <화면이 보이지 않는 방식>. <표정·동작 — 이 장의 감정>. <소품 2개 안팎>.
+A warm, natural lifestyle photograph of <인물 구절 — ①-b 성별값> <환경 구절 — ①-b 환경값>, <시간대>. <인물 묘사 문단 — 머리·안경·옷 포함, 세 장 글자 그대로 동일>.
+<She|He> holds a smartphone <화면이 보이지 않는 방식>. <표정·동작 — 이 장의 감정>. <소품 2개 안팎>.
 <빛·색감·렌즈·분위기>, authentic and unposed. Leave clean empty space in the <upper|lower> third of the frame for text overlay. Vertical 4:5 composition. Avoid: visible phone screen, app interface, text, letters, logos, watermark, extra fingers, distorted hands, <이 장에서 특히 피할 것>, cartoon, illustration.
 ```
+
+예 (남성 · 안경 · 교회): `A warm, natural lifestyle photograph of a handsome Korean man in his early 30s with a soft, gentle demeanor inside a warm, modern church interior, late Sunday morning. He has neat short dark hair and wears simple round glasses, a soft beige knit sweater. …`
 
 ### ⑦ 보고
 
 - 폴더 **절대경로**, 캡처 목록(파일 · 장면) 표, 만든 문서 두 개.
+- **인물 옵션 확정값** (성별·머리·안경·환경 — "랜덤"을 스킬이 정한 경우 무엇으로 정했고 왜인지 한 줄).
 - 사용자 계정을 썼다면 **복원했고 대조했다**는 사실.
 - 찍지 못한 장면이 있으면 그 이유(예: 한글 입력 불가 → 칩으로 대신).
 
