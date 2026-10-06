@@ -37,6 +37,25 @@ bash /Volumes/KAIFACUN/Projects/Skills/showcase/install.sh
 
 ---
 
+### demo-images  📸
+
+앱 기능 하나를 **홍보 카드용 자료 한 벌**로 만든다 — 시뮬레이터에서 기능을 직접 조작하며 화면을 차례로 캡처하고,
+조작 설명서와 인스타 캐러셀용 인물 이미지 3장(시작·중간·끝)의 **복사해 바로 쓰는 단독 프롬프트**를 쓴다.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-create-demo-images | `/kai-create-demo-images <기능 설명>` | 캡처 `NN-*.png` + `README.md` + `promo-image-prompts.md` → `<프로젝트>/docs/screenshots/<기능>/` (git 제외) |
+
+실사용자 계정이 로그인된 기기를 쓰면 **시작 전 상태 기록 → 끝나고 복원 → 대조**한다. 한글은 idb 로 입력되지 않으므로
+앱 안의 칩·프리셋으로 같은 흐름을 보인다. 도우미 `assets/sim.sh`(탭·스와이프·캡처·포인트 배율 환산).
+
+설치:
+```bash
+bash /Volumes/KAIFACUN/Projects/Skills/demo-images/install.sh
+```
+
+---
+
 ### meeting-to-spec
 
 고객 미팅 녹취록을 다부서(BA → 운영 → 시장/마케팅 → 개발 → 사장) 파이프라인으로
