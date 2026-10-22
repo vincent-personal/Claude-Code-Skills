@@ -105,6 +105,24 @@ Angular(SSR/CSR) · Ionic · React · Vue · Next · Svelte · **Flutter** · �
 bash /Volumes/KAIFACUN/Projects/Skills/design-check/install.sh
 ```
 
+### mobile-native
+
+웹 앱 화면을 **데스크톱을 줄인 반응형이 아니라 네이티브 모바일 앱(iOS·Android) 수준**으로 다시 설계·구현한다.
+**모바일 웹 뷰만 바꾸고 데스크톱은 절대 바꾸지 않는다**(1440 Before/After 나란히 비교가 완료 조건).
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-mobile-native | `/kai-mobile-native {화면경로\|전체}` | 목록 → 375px·데스크톱 Before 촬영 → 디자이너(design-critique, Fable)+advisor 진단 → 공용 틀 먼저 재설계 → 구현 → 4모드(ko·en·zh·다크) After 재검토 → design-review 다듬기 → 시험·빌드·교차 검증 |
+
+지키는 것: 빈 공간·불필요한 요소 제거 · 그리드·표 "위치만 바꾸기" 금지(표현 자체를 모바일용으로) ·
+정보·스크롤·폼은 다이얼로그 대신 전체 화면 드로워·바텀 시트 · 주 행동은 엄지 위치(FAB·하단 바) ·
+같은 줄 높이 통일 · 터치 44px · 다국어·다크
+
+설치:
+```bash
+bash /Volumes/KAIFACUN/Projects/Skills/mobile-native/install.sh
+```
+
 ### database  🗄️ *(도메인 그룹)*
 
 **데이터베이스 도메인**의 스킬을 모으는 그룹. 앞으로 백업·복제·튜닝 등이 여기 붙는다.
