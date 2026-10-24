@@ -237,6 +237,31 @@ bash {이 repo}/kai-peer-session/install.sh
 
 ---
 
+### session-net  🕸️
+
+워크스페이스(한 폴더에서 이름 붙여 여는 여러 Claude Code 세션)의 세션들이 **서로를 미리 인지**하게
+만든다. 임의 세션에서 한 번만 실행하면 세션 명부를 만들어 살아 있는 세션들에 브로드캐스트하고,
+워크스페이스 `CLAUDE.md` 에 "명부 + 같은 워크스페이스끼리만 통신" 규칙을 마커 블록으로 기록한다
+(새 세션도 시작부터 인지). 다른 워크스페이스의 동명 세션(검증·어드민 등)에 잘못 묻는 사고를 막는다.
+
+| 스킬 | 명령 | 역할 |
+|---|---|---|
+| kai-session-net | `/kai-session-net [워크스페이스경로]` | 세션 스캔(jsonl `cwd` 실측) → ListAgents 교집합 → 브로드캐스트(자가확인+ACK) → CLAUDE.md 명부 블록 기록. 재실행 = 갱신 |
+
+설치:
+```bash
+bash {이 repo}/session-net/install.sh
+```
+
+- ListAgents 의 `[ref]` 는 작업 폴더를 알려 주지 않고, 디스크에도 없으며, 재시작마다 바뀐다 —
+  ref 는 힌트일 뿐이고, 안전은 **모든 세션 간 송신에 항상 붙는 자가확인 머리말**
+  ("폴더가 W 밖이면 무시하고 회신 금지")에서 나온다. ACK 회신은 그 시점의 확인 기록.
+- 세션 소속 판정은 세션 기록(`~/.claude/projects/*/*.jsonl`)의 `cwd` 필드 실측 — 프로젝트 폴더명
+  인코딩(`/`→`-`)은 손실이 있어 역산하지 않는다.
+- 진단: `python3 {이 repo}/session-net/kai-session-net/session-net.py --workspace {W}` (읽기 전용).
+
+---
+
 ### sermon-correction
 
 한국어 설교 원문을 발표 시간(10/15/20/30분)에 맞춰 축약한 **발표용 교정본**을 만든다.
